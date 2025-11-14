@@ -1,11 +1,13 @@
 ﻿import sys
 import requests
+import cv2
+import numpy as np
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QHBoxLayout, QPushButton, QLabel, QStackedWidget
 )
 from PyQt6.QtCore import Qt, QTimer, QSize
-from PyQt6.QtGui import QPalette, QColor
+from PyQt6.QtGui import QPalette, QColor, QImage, QPixmap
 
 
 class StatusIndicator(QWidget):
@@ -126,33 +128,40 @@ class ModeSelectionView(QWidget):
         self.setLayout(layout)
 
 
-class VisionModePlaceholder(QWidget):
-    """Placeholder widget for Vision Assist Mode."""
+class VisionModeWidget(QWidget):
+    """Widget for Vision Assist Mode with live webcam feed."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.camera = None
+        self.timer = None
         self.init_ui()
         
     def init_ui(self):
         """Initialize the user interface."""
         layout = QVBoxLayout()
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
         # Set background color
         self.setAutoFillBackground(True)
         palette = self.palette()
-        palette.setColor(QPalette.ColorRole.Window, QColor(227, 242, 253))
+        palette.setColor(QPalette.ColorRole.Window, QColor(0, 0, 0))
         self.setPalette(palette)
         
-        # Label
-        label = QLabel("Vision Mode UI")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("""
-            font-size: 36px;
-            font-weight: bold;
-            color: #1976D2;
-        """)
-        layout.addWidget(label)
+        # Video display label
+        self.video_label = QLabel()
+        # Center both horizontally and vertically - not centering vertically YET
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+        self.video_label.setStyleSheet("background-color: black;")
+        self.video_label.setScaledContents(False)  # Disable to prevent distortion for object detection
+        layout.addWidget(self.video_label)
+        
+        # Back button container
+        button_container = QWidget()
+        button_container.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(20, 10, 20, 10)
         
         # Back button
         self.back_button = QPushButton("Back to Mode Selection")
@@ -165,15 +174,92 @@ class VisionModePlaceholder(QWidget):
                 border: none;
                 border-radius: 8px;
                 padding: 10px;
-                margin-top: 30px;
             }
             QPushButton:hover {
                 background-color: #1976D2;
             }
         """)
-        layout.addWidget(self.back_button)
+        button_layout.addStretch()
+        button_layout.addWidget(self.back_button)
+        button_layout.addStretch()
         
+        layout.addWidget(button_container)
         self.setLayout(layout)
+        
+    def start_camera(self):
+        """Start the webcam feed."""
+        if self.camera is None:
+            # Use DirectShow backend instead of MSMF to avoid frame grab errors
+            self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            
+            if not self.camera.isOpened():
+                self.video_label.setText("Error: Could not access webcam")
+                self.video_label.setStyleSheet("""
+                    color: white;
+                    font-size: 24px;
+                    background-color: black;
+                """)
+                return
+            
+            # Set camera properties for better performance
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.camera.set(cv2.CAP_PROP_FPS, 30)
+            # Set buffer size to 1 to minimize lag
+            self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+        if self.timer is None:
+            self.timer = QTimer()
+            self.timer.timeout.connect(self.update_frame)
+            self.timer.start(33) 
+            
+    def stop_camera(self):
+        """Stop the webcam feed."""
+        if self.timer is not None:
+            self.timer.stop()
+            self.timer = None
+            
+        if self.camera is not None:
+            self.camera.release()
+            self.camera = None
+            
+        self.video_label.clear()
+        
+    def update_frame(self):
+        """Capture and display a frame from the webcam."""
+        if self.camera is None or not self.camera.isOpened():
+            return
+            
+        ret, frame = self.camera.read()
+        if ret:
+            # Convert BGR to RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Get frame dimensions
+            h, w, ch = rgb_frame.shape
+            bytes_per_line = ch * w
+            
+            # Convert to QImage
+            qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            
+            # Scale while maintaining aspect ratio
+            scaled_pixmap = QPixmap.fromImage(qt_image).scaled(
+                self.video_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            
+            self.video_label.setPixmap(scaled_pixmap)
+    
+    def showEvent(self, event):
+        """Called when widget is shown."""
+        super().showEvent(event)
+        self.start_camera()
+        
+    def hideEvent(self, event):
+        """Called when widget is hidden."""
+        super().hideEvent(event)
+        self.stop_camera()
 
 
 class HearingModePlaceholder(QWidget):
@@ -306,7 +392,7 @@ class AtlasMainWindow(QMainWindow):
         
         # Create views
         self.mode_selection_view = ModeSelectionView()
-        self.vision_mode_view = VisionModePlaceholder()
+        self.vision_mode_view = VisionModeWidget()
         self.hearing_mode_view = HearingModePlaceholder()
         
         # Add views to stacked widget
