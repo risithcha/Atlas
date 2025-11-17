@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from vision_processor import detect_objects
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -15,29 +16,32 @@ def health_check():
 @app.route('/vision', methods=['POST'])
 def vision_mode():
     """
-    Mock Vision Mode endpoint.
-    Eventually will process camera frames for object detection, OCR, and scene description.
-    For now, returns hard-coded mock data.
+    Vision Mode endpoint.
+    Processes image file and returns detected objects with bounding boxes.
     """
-    # Mock response data
-    mock_response = {
-        "objects": [
-            {
-                "label": "cup",
-                "confidence": 0.92,
-                "box": [150, 220, 250, 320]
-            },
-            {
-                "label": "keyboard",
-                "confidence": 0.88,
-                "box": [100, 400, 600, 550]
-            }
-        ],
-        "ocr_text": "Main Menu",
-        "scene_description": "A desk with a cup and a keyboard."
-    }
+    try:
+        # Check if an image file was uploaded
+        if 'image' not in request.files:
+            return jsonify({"error": "No image file provided"}), 400
+        
+        image_file = request.files['image']
+        
+        # Check if the file is empty
+        if image_file.filename == '':
+            return jsonify({"error": "Empty filename"}), 400
+        
+        # Read the image data
+        image_data = image_file.read()
+        
+        # Perform object detection
+        result = detect_objects(image_data)
+        
+        return jsonify(result), 200
     
-    return jsonify(mock_response), 200
+    except Exception as e:
+        # Log the error and return a 500 response
+        print(f"Error in vision endpoint: {str(e)}")
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
 @app.errorhandler(404)
 def not_found(error):
