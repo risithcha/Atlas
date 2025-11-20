@@ -17,21 +17,19 @@ def health_check():
 def vision_mode():
     """
     Vision Mode endpoint.
-    Processes image file and returns detected objects with bounding boxes.
+    Processes base64-encoded image and returns detected objects with bounding boxes.
     """
     try:
-        # Check if an image file was uploaded
-        if 'image' not in request.files:
-            return jsonify({"error": "No image file provided"}), 400
+        # Check if JSON data was provided
+        if not request.json or 'image' not in request.json:
+            return jsonify({"error": "No image data provided"}), 400
         
-        image_file = request.files['image']
+        # Get base64-encoded image
+        import base64
+        image_base64 = request.json['image']
         
-        # Check if the file is empty
-        if image_file.filename == '':
-            return jsonify({"error": "Empty filename"}), 400
-        
-        # Read the image data
-        image_data = image_file.read()
+        # Decode base64 to bytes
+        image_data = base64.b64decode(image_base64)
         
         # Perform object detection
         result = detect_objects(image_data)

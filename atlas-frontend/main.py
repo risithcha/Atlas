@@ -2,12 +2,14 @@
 import requests
 import cv2
 import numpy as np
+import base64
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QHBoxLayout, QPushButton, QLabel, QStackedWidget
 )
 from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QPalette, QColor, QImage, QPixmap
+from data_overlay import OverlayLabel
 
 
 class StatusIndicator(QWidget):
@@ -135,6 +137,9 @@ class VisionModeWidget(QWidget):
         super().__init__(parent)
         self.camera = None
         self.timer = None
+        self.analysis_timer = None
+        self.current_frame = None
+        self.backend_url = "http://127.0.0.1:5000"
         self.init_ui()
         
     def init_ui(self):
@@ -149,9 +154,9 @@ class VisionModeWidget(QWidget):
         palette.setColor(QPalette.ColorRole.Window, QColor(0, 0, 0))
         self.setPalette(palette)
         
-        # Video display label
-        self.video_label = QLabel()
-        # Center both horizontally and vertically - not centering vertically YET
+        # Video display label with overlay capability
+        self.video_label = OverlayLabel(self)
+        # Center both horizontally and vertically
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
         self.video_label.setStyleSheet("background-color: black;")
         self.video_label.setScaledContents(False)  # Disable to prevent distortion for object detection
@@ -211,13 +216,23 @@ class VisionModeWidget(QWidget):
         if self.timer is None:
             self.timer = QTimer()
             self.timer.timeout.connect(self.update_frame)
-            self.timer.start(33) 
+            self.timer.start(33)
+        
+        # Start analysis timer for backend communication
+        if self.analysis_timer is None:
+            self.analysis_timer = QTimer()
+            self.analysis_timer.timeout.connect(self.send_frame_for_analysis)
+            self.analysis_timer.start(1500)  # Send frame every 1.5 seconds 
             
     def stop_camera(self):
         """Stop the webcam feed."""
         if self.timer is not None:
             self.timer.stop()
             self.timer = None
+        
+        if self.analysis_timer is not None:
+            self.analysis_timer.stop()
+            self.analysis_timer = None
             
         if self.camera is not None:
             self.camera.release()
@@ -232,6 +247,9 @@ class VisionModeWidget(QWidget):
             
         ret, frame = self.camera.read()
         if ret:
+            # Store current frame for backend analysis
+            self.current_frame = frame
+            
             # Convert BGR to RGB
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
@@ -250,6 +268,31 @@ class VisionModeWidget(QWidget):
             )
             
             self.video_label.setPixmap(scaled_pixmap)
+    
+    def send_frame_for_analysis(self):
+        """Send the current frame to backend for object detection analysis."""
+        if self.current_frame is None:
+            return
+        
+        try:
+            # Encode frame as JPEG
+            _, buffer = cv2.imencode('.jpg', self.current_frame)
+            frame_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            # Send POST request to backend
+            response = requests.post(
+                f"{self.backend_url}/vision",
+                json={"image": frame_base64},
+                timeout=2
+            )
+            
+            if response.status_code == 200:
+                # Update overlay with detection data
+                self.video_label.update_data(response.json())
+        
+        except requests.exceptions.RequestException as e:
+            # Silently handle backend communication errors
+            pass
     
     def showEvent(self, event):
         """Called when widget is shown."""
