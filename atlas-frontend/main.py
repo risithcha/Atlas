@@ -160,7 +160,8 @@ class VisionModeWidget(QWidget):
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
         self.video_label.setStyleSheet("background-color: black;")
         self.video_label.setScaledContents(False)  # Disable to prevent distortion for object detection
-        layout.addWidget(self.video_label)
+        self.video_label.setMinimumSize(640, 480)  # Ensure minimum visibility
+        layout.addWidget(self.video_label, 1)  # Stretch factor 1 for maximum space
         
         # Back button container
         button_container = QWidget()
@@ -287,8 +288,9 @@ class VisionModeWidget(QWidget):
             )
             
             if response.status_code == 200:
-                # Update overlay with detection data
-                self.video_label.update_data(response.json())
+                # Update overlay with detection data and frame size for coordinate mapping
+                frame_height, frame_width = self.current_frame.shape[:2]
+                self.video_label.update_data(response.json(), frame_size=(frame_width, frame_height))
         
         except requests.exceptions.RequestException as e:
             # Silently handle backend communication errors
@@ -399,6 +401,11 @@ class AtlasMainWindow(QMainWindow):
         self.backend = BackendCommunicator()
         self.init_ui()
         self.check_backend_status()
+        
+        # Set up periodic backend status checking
+        self.status_timer = QTimer()
+        self.status_timer.timeout.connect(self.check_backend_status)
+        self.status_timer.start(3000)  # Check every 3 seconds
         
     def init_ui(self):
         """Initialize the user interface."""
