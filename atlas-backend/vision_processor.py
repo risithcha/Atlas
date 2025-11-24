@@ -4,11 +4,15 @@ from torchvision.models.detection import ssdlite320_mobilenet_v3_large, SSDLite3
 from PIL import Image
 import io
 import numpy as np
+import easyocr
 
 # Global variables to cache the model
 _model = None
 _weights = None
 _device = None
+
+# Global variable to cache the OCR reader
+_ocr_reader = None
 
 def _load_model():
     """
@@ -31,11 +35,56 @@ def _load_model():
     
     return _model, _weights, _device
 
+def _load_ocr_reader():
+    """
+    Load the OCR reader.
+    Cached after first call for performance.
+    """
+    global _ocr_reader
+    
+    if _ocr_reader is None:
+        # Use GPU if available, otherwise CPU
+        use_gpu = torch.cuda.is_available()
+        
+        # Load OCR reader with English language support
+        _ocr_reader = easyocr.Reader(['en'], gpu=use_gpu)
+        
+        print(f"OCR reader loaded successfully (GPU: {use_gpu})")
+    
+    return _ocr_reader
+
+def _generate_scene_description(detected_objects, ocr_text):
+    """
+    Generate natural language scene description.
+    Combines detected objects and OCR text.
+    """
+    if not detected_objects and not ocr_text:
+        return "No objects or text detected in the image."
+    
+    description_parts = []
+    
+    # Add object detection results
+    if detected_objects:
+        object_labels = [obj['label'] for obj in detected_objects]
+        
+        if len(object_labels) == 1:
+            description_parts.append(f"I see a {object_labels[0]}")
+        elif len(object_labels) == 2:
+            description_parts.append(f"I see a {object_labels[0]} and a {object_labels[1]}")
+        else:
+            objects_list = ', '.join(object_labels[:-1])
+            description_parts.append(f"I see a {objects_list}, and a {object_labels[-1]}")
+    
+    # Add OCR text results
+    if ocr_text:
+        description_parts.append(f"Text detected: {ocr_text}")
+    
+    return ". ".join(description_parts) + "."
+
 def detect_objects(image_data):
     """
-    Detect objects in an image using MobileNet-SSD.
-    Returns detected objects with labels, confidence scores, and bounding boxes.
-    Eventually will include OCR and scene description.
+    Detect objects using MobileNet-SSD, extract text via OCR, and generate scene description.
+    Returns all detection data including objects, OCR text, and scene description.
     """
     # Load model and prepare image
     model, weights, device = _load_model()
@@ -72,12 +121,20 @@ def detect_objects(image_data):
                 'box': [x_min, y_min, x_max, y_max]
             })
     
-    # Build response with detected objects
-    # OCR and scene description to be added later
+    # Run OCR to extract text
+    ocr_reader = _load_ocr_reader()
+    image_np = np.array(image)
+    ocr_results = ocr_reader.readtext(image_np, detail=0)
+    ocr_text = ' '.join(ocr_results) if ocr_results else ''
+    
+    # Generate scene description
+    scene_description = _generate_scene_description(detected_objects, ocr_text)
+    
+    # Build response with all data
     response = {
         'objects': detected_objects,
-        'ocr_text': '',
-        'scene_description': ''
+        'ocr_text': ocr_text,
+        'scene_description': scene_description
     }
     
     return response
