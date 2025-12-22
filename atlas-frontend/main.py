@@ -5,7 +5,8 @@ import numpy as np
 import base64
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, 
-    QHBoxLayout, QPushButton, QLabel, QStackedWidget
+    QHBoxLayout, QPushButton, QLabel, QStackedWidget,
+    QTextEdit, QGroupBox, QSplitter, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QPalette, QColor, QImage, QPixmap
@@ -144,9 +145,9 @@ class VisionModeWidget(QWidget):
         
     def init_ui(self):
         """Initialize the user interface."""
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
         # Set background color
         self.setAutoFillBackground(True)
@@ -154,14 +155,124 @@ class VisionModeWidget(QWidget):
         palette.setColor(QPalette.ColorRole.Window, QColor(0, 0, 0))
         self.setPalette(palette)
         
+        # Create a splitter for resizable layout between video and sidebar
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setStyleSheet("QSplitter::handle { background-color: #333; }")
+        
+        # Video container widget
+        video_container = QWidget()
+        video_container.setStyleSheet("background-color: black;")
+        video_layout = QVBoxLayout(video_container)
+        video_layout.setContentsMargins(0, 0, 0, 0)
+        video_layout.setSpacing(0)
+        
         # Video display label with overlay capability
         self.video_label = OverlayLabel(self)
         # Center both horizontally and vertically
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
         self.video_label.setStyleSheet("background-color: black;")
         self.video_label.setScaledContents(False)  # Disable to prevent distortion for object detection
-        self.video_label.setMinimumSize(640, 480)  # Ensure minimum visibility
-        layout.addWidget(self.video_label, 1)  # Stretch factor 1 for maximum space
+        self.video_label.setMinimumSize(480, 360)  # Ensure minimum visibility
+        video_layout.addWidget(self.video_label, 1)  # Stretch factor 1 for maximum space
+        
+        # Add video container to splitter
+        self.splitter.addWidget(video_container)
+        
+        # Create sidebar for text information
+        sidebar = QWidget()
+        sidebar.setMinimumWidth(250)
+        sidebar.setMaximumWidth(400)
+        sidebar.setStyleSheet("background-color: #1a1a1a;")
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(10, 10, 10, 10)
+        sidebar_layout.setSpacing(10)
+        
+        # OCR Text Group
+        ocr_group = QGroupBox("Detected Text (OCR)")
+        ocr_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 14px;
+                font-weight: bold;
+                color: #4CAF50;
+                border: 1px solid #4CAF50;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        ocr_layout = QVBoxLayout(ocr_group)
+        
+        self.ocr_text_display = QTextEdit()
+        self.ocr_text_display.setReadOnly(True)
+        self.ocr_text_display.setPlaceholderText("No text detected yet...")
+        self.ocr_text_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #2d2d2d;
+                color: #e0e0e0;
+                border: none;
+                border-radius: 5px;
+                padding: 8px;
+                font-size: 13px;
+            }
+        """)
+        self.ocr_text_display.setMinimumHeight(120)
+        ocr_layout.addWidget(self.ocr_text_display)
+        
+        sidebar_layout.addWidget(ocr_group)
+        
+        # Scene Description Group
+        scene_group = QGroupBox("Scene Description")
+        scene_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 14px;
+                font-weight: bold;
+                color: #2196F3;
+                border: 1px solid #2196F3;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        scene_layout = QVBoxLayout(scene_group)
+        
+        self.scene_description_display = QTextEdit()
+        self.scene_description_display.setReadOnly(True)
+        self.scene_description_display.setPlaceholderText("Analyzing scene...")
+        self.scene_description_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #2d2d2d;
+                color: #e0e0e0;
+                border: none;
+                border-radius: 5px;
+                padding: 8px;
+                font-size: 13px;
+            }
+        """)
+        self.scene_description_display.setMinimumHeight(150)
+        scene_layout.addWidget(self.scene_description_display)
+        
+        sidebar_layout.addWidget(scene_group)
+        sidebar_layout.addStretch()  # Push content to top
+        
+        # Add sidebar to splitter
+        self.splitter.addWidget(sidebar)
+        
+        # Set initial splitter sizes (70% video, 30% sidebar)
+        self.splitter.setSizes([700, 300])
+        self.splitter.setStretchFactor(0, 7)
+        self.splitter.setStretchFactor(1, 3)
+        
+        main_layout.addWidget(self.splitter, 1)
         
         # Back button container
         button_container = QWidget()
@@ -189,8 +300,8 @@ class VisionModeWidget(QWidget):
         button_layout.addWidget(self.back_button)
         button_layout.addStretch()
         
-        layout.addWidget(button_container)
-        self.setLayout(layout)
+        main_layout.addWidget(button_container)
+        self.setLayout(main_layout)
         
     def start_camera(self):
         """Start the webcam feed."""
@@ -288,9 +399,33 @@ class VisionModeWidget(QWidget):
             )
             
             if response.status_code == 200:
+                response_data = response.json()
+                
                 # Update overlay with detection data and frame size for coordinate mapping
                 frame_height, frame_width = self.current_frame.shape[:2]
-                self.video_label.update_data(response.json(), frame_size=(frame_width, frame_height))
+                self.video_label.update_data(response_data, frame_size=(frame_width, frame_height))
+                
+                # Update OCR text display
+                ocr_text = response_data.get('ocr_text', '')
+                if ocr_text and ocr_text.strip():
+                    self.ocr_text_display.setPlainText(ocr_text)
+                else:
+                    self.ocr_text_display.setPlainText("No text detected in current view.")
+                
+                # Update scene description display
+                scene_description = response_data.get('scene_description', '')
+                if scene_description and scene_description.strip():
+                    self.scene_description_display.setPlainText(scene_description)
+                else:
+                    # If no scene description, create a basic one from detected objects
+                    detections = response_data.get('detections', [])
+                    if detections:
+                        object_names = [d.get('label', 'object') for d in detections]
+                        unique_objects = list(set(object_names))
+                        basic_description = f"Detected objects: {', '.join(unique_objects)}"
+                        self.scene_description_display.setPlainText(basic_description)
+                    else:
+                        self.scene_description_display.setPlainText("Analyzing scene...")
         
         except requests.exceptions.RequestException as e:
             # Silently handle backend communication errors
