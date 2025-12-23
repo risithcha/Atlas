@@ -3,14 +3,16 @@ import requests
 import cv2
 import numpy as np
 import base64
+import threading
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QHBoxLayout, QPushButton, QLabel, QStackedWidget,
     QTextEdit, QGroupBox, QSplitter, QFrame
 )
-from PyQt6.QtCore import Qt, QTimer, QSize
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QObject
 from PyQt6.QtGui import QPalette, QColor, QImage, QPixmap
 from data_overlay import OverlayLabel
+from audio_engine import AudioRecorder
 
 
 class StatusIndicator(QWidget):
@@ -442,54 +444,448 @@ class VisionModeWidget(QWidget):
         self.stop_camera()
 
 
-class HearingModePlaceholder(QWidget):
-    """Placeholder widget for Hearing Assist Mode."""
+class HearingModeWidget(QWidget):
+    """Hearing Assist widget with live captions and threaded audio capture."""
+    
+    # Signals for thread-safe UI updates
+    transcription_received = pyqtSignal(str)  # Emitted when transcription is ready
+    error_received = pyqtSignal(str)          # Emitted when an error occurs
+    status_update = pyqtSignal()              # Emitted to update status to listening
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.backend_url = "http://127.0.0.1:5000"
+        self.recorder = None
+        self.is_listening = False
+        
+        # Connect signals to slots (thread-safe)
+        self.transcription_received.connect(self._append_transcription)
+        self.error_received.connect(self._show_error)
+        self.status_update.connect(self._update_status_listening)
+        
         self.init_ui()
+        self.init_audio_recorder()
         
     def init_ui(self):
         """Initialize the user interface."""
-        layout = QVBoxLayout()
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
         
-        # Set background color
+        # Set dark background for high contrast
         self.setAutoFillBackground(True)
         palette = self.palette()
-        palette.setColor(QPalette.ColorRole.Window, QColor(232, 245, 233))
+        palette.setColor(QPalette.ColorRole.Window, QColor(26, 26, 26))
         self.setPalette(palette)
         
-        # Label
-        label = QLabel("Hearing Mode UI")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("""
-            font-size: 36px;
-            font-weight: bold;
-            color: #2E7D32;
-        """)
-        layout.addWidget(label)
+        # Header with title and status
+        header_layout = QHBoxLayout()
         
-        # Back button
-        self.back_button = QPushButton("Back to Mode Selection")
-        self.back_button.setMinimumSize(QSize(250, 50))
-        self.back_button.setStyleSheet("""
-            QPushButton {
+        # Title
+        title = QLabel("Hearing Assist Mode")
+        title.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        title.setStyleSheet("""
+            font-size: 28px;
+            font-weight: bold;
+            color: #4CAF50;
+            padding: 10px;
+        """)
+        header_layout.addWidget(title)
+        
+        header_layout.addStretch()
+        
+        # Listening status indicator
+        self.status_label = QLabel("Ready")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.status_label.setStyleSheet("""
+            font-size: 16px;
+            font-weight: bold;
+            color: #888;
+            padding: 10px;
+        """)
+        header_layout.addWidget(self.status_label)
+        
+        main_layout.addLayout(header_layout)
+        
+        # Instructions label
+        self.instructions_label = QLabel("Click 'Start Listening' and speak clearly. Your speech will appear below.")
+        self.instructions_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.instructions_label.setWordWrap(True)
+        self.instructions_label.setStyleSheet("""
+            font-size: 14px;
+            color: #aaa;
+            padding: 5px;
+            margin-bottom: 10px;
+        """)
+        main_layout.addWidget(self.instructions_label)
+        
+        # Main caption display area - large, high contrast, scrollable
+        caption_group = QGroupBox("Live Captions")
+        caption_group.setStyleSheet("""
+            QGroupBox {
                 font-size: 16px;
+                font-weight: bold;
+                color: #4CAF50;
+                border: 2px solid #4CAF50;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 10px;
+            }
+        """)
+        caption_layout = QVBoxLayout(caption_group)
+        
+        self.caption_display = QTextEdit()
+        self.caption_display.setReadOnly(True)
+        self.caption_display.setPlaceholderText(
+            "Your transcribed speech will appear here...\n\n"
+            "Tips:\n"
+            "- Speak clearly and at a normal pace\n"
+            "- Reduce background noise for best results\n"
+            "- Each chunk of speech will be transcribed after a few seconds"
+        )
+        self.caption_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #1a1a1a;
+                color: #ffffff;
+                border: none;
+                border-radius: 8px;
+                padding: 15px;
+                font-size: 22px;
+                font-family: 'Segoe UI', Arial, sans-serif;
+                line-height: 1.5;
+            }
+            QTextEdit:focus {
+                border: 1px solid #4CAF50;
+            }
+        """)
+        self.caption_display.setMinimumHeight(300)
+        caption_layout.addWidget(self.caption_display)
+        
+        main_layout.addWidget(caption_group, 1)  # Stretch factor 1
+        
+        # Control buttons container
+        button_container = QWidget()
+        button_container.setStyleSheet("background-color: transparent;")
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 10, 0, 10)
+        button_layout.setSpacing(20)
+        
+        # Start/Stop Listening button
+        self.listen_button = QPushButton("Start Listening")
+        self.listen_button.setMinimumSize(QSize(250, 60))
+        self.listen_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.listen_button.setStyleSheet("""
+            QPushButton {
+                font-size: 18px;
+                font-weight: bold;
                 background-color: #4CAF50;
                 color: white;
                 border: none;
-                border-radius: 8px;
-                padding: 10px;
-                margin-top: 30px;
+                border-radius: 10px;
+                padding: 15px 30px;
             }
             QPushButton:hover {
                 background-color: #45a049;
             }
+            QPushButton:pressed {
+                background-color: #2E7D32;
+            }
+            QPushButton:disabled {
+                background-color: #666;
+                color: #aaa;
+            }
         """)
-        layout.addWidget(self.back_button)
+        self.listen_button.clicked.connect(self.toggle_listening)
+        button_layout.addStretch()
+        button_layout.addWidget(self.listen_button)
         
-        self.setLayout(layout)
+        # Clear button
+        self.clear_button = QPushButton("Clear")
+        self.clear_button.setMinimumSize(QSize(120, 60))
+        self.clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_button.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                font-weight: bold;
+                background-color: #555;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                padding: 15px 20px;
+            }
+            QPushButton:hover {
+                background-color: #666;
+            }
+            QPushButton:pressed {
+                background-color: #444;
+            }
+        """)
+        self.clear_button.clicked.connect(self.clear_captions)
+        button_layout.addWidget(self.clear_button)
+        button_layout.addStretch()
+        
+        main_layout.addWidget(button_container)
+        
+        # Back button
+        self.back_button = QPushButton("Back to Mode Selection")
+        self.back_button.setMinimumSize(QSize(250, 50))
+        self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.back_button.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                background-color: #333;
+                color: #ccc;
+                border: 1px solid #555;
+                border-radius: 8px;
+                padding: 10px;
+            }
+            QPushButton:hover {
+                background-color: #444;
+                color: white;
+            }
+        """)
+        
+        back_layout = QHBoxLayout()
+        back_layout.addWidget(self.back_button)
+        back_layout.addStretch()
+        main_layout.addLayout(back_layout)
+        
+        self.setLayout(main_layout)
+        
+    
+    def init_audio_recorder(self):
+        """Initialize the audio recorder and connect signals."""
+        self.recorder = AudioRecorder(self)
+        # Connect signals
+        self.recorder.audio_ready.connect(self.on_audio_ready)
+        self.recorder.error_occurred.connect(self.on_audio_error)
+        self.recorder.recording_started.connect(self.on_recording_started)
+        self.recorder.recording_stopped.connect(self.on_recording_stopped)
+    
+    def toggle_listening(self):
+        """Toggle between listening and stopped states."""
+        if self.is_listening:
+            self.stop_listening()
+        else:
+            self.start_listening()
+    
+    def start_listening(self):
+        """Start capturing audio from the microphone."""
+        if self.recorder is None:
+            self.on_audio_error("Audio recorder not initialized")
+            return
+            
+        # Start recording with 3-second chunks
+        success = self.recorder.start_listening(chunk_duration=3.0)
+        
+        if success:
+            self.is_listening = True
+            self.listen_button.setText("Stop Listening")
+            self.listen_button.setStyleSheet("""
+                QPushButton {
+                    font-size: 18px;
+                    font-weight: bold;
+                    background-color: #f44336;
+                    color: white;
+                    border: none;
+                    border-radius: 10px;
+                    padding: 15px 30px;
+                }
+                QPushButton:hover {
+                    background-color: #d32f2f;
+                }
+                QPushButton:pressed {
+                    background-color: #b71c1c;
+                }
+            """)
+    
+    def stop_listening(self):
+        """Stop capturing audio."""
+        if self.recorder:
+            self.recorder.stop_listening()
+        
+        self.is_listening = False
+        self.listen_button.setText("Start Listening")
+        self.listen_button.setStyleSheet("""
+            QPushButton {
+                font-size: 18px;
+                font-weight: bold;
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                padding: 15px 30px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #2E7D32;
+            }
+        """)
+    
+    def on_audio_ready(self, audio_data: bytes):
+        """
+        Handle audio data when a chunk is ready.
+        Sends the audio to the backend for transcription.
+        """
+        # Update status to show processing
+        self.status_label.setText("Processing...")
+        self.status_label.setStyleSheet("""
+            font-size: 16px;
+            font-weight: bold;
+            color: #FFC107;
+            padding: 10px;
+        """)
+        
+        # Send to backend in a separate thread to avoid blocking UI
+        thread = threading.Thread(
+            target=self._send_audio_to_backend,
+            args=(audio_data,),
+            daemon=True
+        )
+        thread.start()
+    
+    def _send_audio_to_backend(self, audio_data: bytes):
+        """Send audio data to the backend for transcription (runs in thread)."""
+        try:
+            # Encode audio as base64
+            audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+            
+            print(f"[DEBUG] Sending {len(audio_data)} bytes to backend...")
+            
+            # Send POST request to backend
+            response = requests.post(
+                f"{self.backend_url}/hearing",
+                json={"audio": audio_base64},
+                timeout=30  # Whisper can take time for longer audio
+            )
+            
+            print(f"[DEBUG] Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                transcription = data.get('transcription', '')
+                
+                print(f"[DEBUG] Transcription received: '{transcription}'")
+                
+                if transcription.strip():
+                    # Emit signal to safely update UI from background thread
+                    print(f"[DEBUG] Emitting transcription signal...")
+                    self.transcription_received.emit(transcription.strip())
+                else:
+                    print("[DEBUG] Empty transcription, updating status...")
+                    self.status_update.emit()
+            else:
+                error_msg = response.json().get('error', 'Unknown error')
+                print(f"[DEBUG] Backend error: {error_msg}")
+                self.error_received.emit(f"Backend error: {error_msg}")
+                
+        except requests.exceptions.ConnectionError:
+            print("[DEBUG] Connection error to backend")
+            self.error_received.emit("Cannot connect to backend")
+        except requests.exceptions.Timeout:
+            print("[DEBUG] Request timeout")
+            self.error_received.emit("Request timed out")
+        except Exception as e:
+            print(f"[DEBUG] Exception: {e}")
+            self.error_received.emit(str(e))
+    
+    def _append_transcription(self, text: str):
+        """Append transcribed text to the caption display."""
+        print(f"[DEBUG] _append_transcription called with: '{text}'")
+        
+        current_text = self.caption_display.toPlainText()
+        
+        if current_text and not current_text.endswith('\n'):
+            # Add a space or newline before new text
+            if len(current_text) > 100:
+                new_text = current_text + '\n' + text
+            else:
+                new_text = current_text + ' ' + text
+        else:
+            new_text = current_text + text
+        
+        self.caption_display.setPlainText(new_text)
+        print(f"[DEBUG] Caption display updated, new length: {len(new_text)}")
+        
+        # Scroll to bottom
+        scrollbar = self.caption_display.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        
+        # Update status back to listening
+        self._update_status_listening()
+    
+    def _update_status_listening(self):
+        """Update status to show actively listening."""
+        if self.is_listening:
+            self.status_label.setText("● Listening...")
+            self.status_label.setStyleSheet("""
+                font-size: 16px;
+                font-weight: bold;
+                color: #4CAF50;
+                padding: 10px;
+            """)
+    
+    def _show_error(self, message: str):
+        """Show an error message in the status."""
+        self.status_label.setText(f"Error")
+        self.status_label.setStyleSheet("""
+            font-size: 16px;
+            font-weight: bold;
+            color: #f44336;
+            padding: 10px;
+        """)
+        self.status_label.setToolTip(message)
+        
+        # Reset status after a delay
+        QTimer.singleShot(3000, self._update_status_listening)
+    
+    def on_audio_error(self, error_message: str):
+        """Handle audio recording errors."""
+        self._show_error(error_message)
+        print(f"Audio error: {error_message}")
+    
+    def on_recording_started(self):
+        """Handle recording started event."""
+        self.status_label.setText("Listening...")
+        self.status_label.setStyleSheet("""
+            font-size: 16px;
+            font-weight: bold;
+            color: #4CAF50;
+            padding: 10px;
+        """)
+    
+    def on_recording_stopped(self):
+        """Handle recording stopped event."""
+        self.status_label.setText("Ready")
+        self.status_label.setStyleSheet("""
+            font-size: 16px;
+            font-weight: bold;
+            color: #888;
+            padding: 10px;
+        """)
+    
+    def clear_captions(self):
+        """Clear the caption display."""
+        self.caption_display.clear()
+    
+    def showEvent(self, event):
+        """Called when widget is shown."""
+        super().showEvent(event)
+        # User starts recording manually
+    
+    def hideEvent(self, event):
+        """Called when widget is hidden."""
+        super().hideEvent(event)
+        # Stop recording when leaving the view
+        if self.is_listening:
+            self.stop_listening()
 
 
 class BackendCommunicator:
@@ -578,7 +974,7 @@ class AtlasMainWindow(QMainWindow):
         # Create views
         self.mode_selection_view = ModeSelectionView()
         self.vision_mode_view = VisionModeWidget()
-        self.hearing_mode_view = HearingModePlaceholder()
+        self.hearing_mode_view = HearingModeWidget()
         
         # Add views to stacked widget
         self.stacked_widget.addWidget(self.mode_selection_view)
