@@ -1,10 +1,12 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from vision_processor import detect_objects
+from sound_classifier import classify_audio
 import tempfile
 import os
 import base64
 from faster_whisper import WhisperModel
+from concurrent.futures import ThreadPoolExecutor
 import logging
 
 # Configure logging for faster-whisper
@@ -18,6 +20,9 @@ CORS(app)  # Enable CORS for frontend communication
 print("Loading Whisper model")
 whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
 print("Whisper model loaded")
+
+# Initialize thread pool for parallel processing
+executor = ThreadPoolExecutor(max_workers=2)
 
 @app.route('/status', methods=['GET'])
 def health_check():
@@ -57,7 +62,10 @@ def vision_mode():
 
 @app.route('/hearing', methods=['POST'])
 def hearing_mode():
-    """Hearing endpoint; accepts base64-encoded WAV audio and returns Whisper text."""
+    """
+    Hearing endpoint. Accepts base64-encoded WAV audio and returns transcription and sound classification.
+    Runs transcription and classification in parallel for responsiveness.
+    """
     temp_path = None
     try:
         # Expect base64-encoded audio in JSON: { "audio": "...base64..." }
@@ -82,36 +90,61 @@ def hearing_mode():
         
         print(f"[DEBUG] Saved to temp file: {temp_path}")
         
-        # Transcribe using Whisper
-        segments, info = whisper_model.transcribe(
-            temp_path,
-            beam_size=5,
-            language=None,  # Auto-detect language
-            vad_filter=True,  # Filter out non-speech
-            vad_parameters=dict(min_silence_duration_ms=500)
-        )
+        # Run transcription and sound classification in parallel
+        def do_transcription():
+            """Transcribe audio with Whisper."""
+            segments, info = whisper_model.transcribe(
+                temp_path,
+                beam_size=5,
+                language=None,  # Auto-detect language
+                vad_filter=True,  # Filter out non-speech
+                vad_parameters=dict(min_silence_duration_ms=500)
+            )
+            
+            # Collect all transcribed text
+            transcription_parts = []
+            for segment in segments:
+                transcription_parts.append(segment.text.strip())
+            
+            return " ".join(transcription_parts).strip(), info
         
-        # Collect all transcribed text
-        transcription_parts = []
-        for segment in segments:
-            transcription_parts.append(segment.text.strip())
+        def do_sound_classification():
+            """Classify environmental sounds."""
+            return classify_audio(audio_data)
         
-        full_transcription = " ".join(transcription_parts).strip()
+        # Submit both tasks to run in parallel
+        transcription_future = executor.submit(do_transcription)
+        classification_future = executor.submit(do_sound_classification)
+        
+        # Wait for both results
+        full_transcription, info = transcription_future.result()
+        classification_result = classification_future.result()
         
         print(f"[DEBUG] Transcription result: '{full_transcription}'")
         print(f"[DEBUG] Language: {info.language} (probability: {info.language_probability:.2f})")
+        print(f"[DEBUG] Sound classification: {classification_result}")
         
         # Clean up temp file
         if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)
             temp_path = None
         
-        return jsonify({
+        # Build response with both transcription and alert info
+        response = {
             "transcription": full_transcription,
+            "alert": classification_result.get("alert"),
+            "alert_type": classification_result.get("alert_type"),
+            "alert_confidence": classification_result.get("confidence"),
             "language": info.language,
             "language_probability": info.language_probability,
             "duration": info.duration
-        }), 200
+        }
+        
+        # Log if alert detected
+        if classification_result.get("alert"):
+            print(f"[ALERT] {classification_result.get('alert')} (confidence: {classification_result.get('confidence'):.2f})")
+        
+        return jsonify(response), 200
     
     except Exception as e:
         # Clean up temp file on error
