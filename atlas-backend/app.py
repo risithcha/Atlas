@@ -170,4 +170,5 @@ if __name__ == '__main__':
     print("Health check: http://127.0.0.1:5000/status")
     print("Vision endpoint: http://127.0.0.1:5000/vision")
     print("Hearing endpoint: http://127.0.0.1:5000/hearing")
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    # Use threaded=True for concurrent requests, debug=False to prevent model double-loading
+    app.run(host='127.0.0.1', port=5000, debug=False, threaded=True)

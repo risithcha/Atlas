@@ -4,13 +4,14 @@ import cv2
 import numpy as np
 import base64
 import threading
+import winsound
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QHBoxLayout, QPushButton, QLabel, QStackedWidget,
     QTextEdit, QGroupBox, QSplitter, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QObject
-from PyQt6.QtGui import QPalette, QColor, QImage, QPixmap
+from PyQt6.QtGui import QPalette, QColor, QImage, QPixmap, QFont
 from data_overlay import OverlayLabel
 from audio_engine import AudioRecorder
 
@@ -451,17 +452,27 @@ class HearingModeWidget(QWidget):
     transcription_received = pyqtSignal(str)  # Emitted when transcription is ready
     error_received = pyqtSignal(str)          # Emitted when an error occurs
     status_update = pyqtSignal()              # Emitted to update status to listening
+    alert_received = pyqtSignal(str)          # Emitted when a safety alert is detected
+    alert_cleared = pyqtSignal()              # Emitted when alert condition clears
+    
+    # Safe flash interval (500ms = 1Hz, well below 3Hz epilepsy threshold)
+    ALERT_FLASH_INTERVAL_MS = 500
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.backend_url = "http://127.0.0.1:5000"
         self.recorder = None
         self.is_listening = False
+        self.alert_flash_timer = None
+        self.alert_flash_state = False
+        self.current_alert = None
         
         # Connect signals to slots (thread-safe)
         self.transcription_received.connect(self._append_transcription)
         self.error_received.connect(self._show_error)
         self.status_update.connect(self._update_status_listening)
+        self.alert_received.connect(self._show_alert_overlay)
+        self.alert_cleared.connect(self._hide_alert_overlay)
         
         self.init_ui()
         self.init_audio_recorder()
@@ -567,6 +578,86 @@ class HearingModeWidget(QWidget):
         caption_layout.addWidget(self.caption_display)
         
         main_layout.addWidget(caption_group, 1)  # Stretch factor 1
+        
+        # ===== CRISIS MODE ALERT OVERLAY =====
+        # Hidden overlay that appears on top of everything when an alert is detected
+        self.alert_overlay = QFrame(self)
+        self.alert_overlay.setObjectName("alertOverlay")
+        self.alert_overlay.setStyleSheet("""
+            QFrame#alertOverlay {
+                background-color: #D32F2F;
+                border: 4px solid #FFEB3B;
+                border-radius: 15px;
+            }
+        """)
+        self.alert_overlay.setVisible(False)
+        
+        # Alert overlay layout
+        alert_layout = QVBoxLayout(self.alert_overlay)
+        alert_layout.setContentsMargins(30, 20, 30, 20)
+        alert_layout.setSpacing(10)
+        
+        # Warning icon and text
+        self.alert_icon_label = QLabel("🚨")
+        self.alert_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.alert_icon_label.setStyleSheet("""
+            font-size: 64px;
+            background: transparent;
+        """)
+        alert_layout.addWidget(self.alert_icon_label)
+        
+        self.alert_text_label = QLabel("⚠️ ALARM DETECTED ⚠️")
+        self.alert_text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.alert_text_label.setWordWrap(True)
+        alert_font = QFont("Segoe UI", 28, QFont.Weight.Bold)
+        self.alert_text_label.setFont(alert_font)
+        self.alert_text_label.setStyleSheet("""
+            color: #FFFFFF;
+            background: transparent;
+            padding: 10px;
+        """)
+        alert_layout.addWidget(self.alert_text_label)
+        
+        # Detailed alert message
+        self.alert_detail_label = QLabel("")
+        self.alert_detail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.alert_detail_label.setWordWrap(True)
+        self.alert_detail_label.setStyleSheet("""
+            font-size: 18px;
+            color: #FFEB3B;
+            background: transparent;
+            padding: 5px;
+        """)
+        alert_layout.addWidget(self.alert_detail_label)
+        
+        # Dismiss button
+        self.alert_dismiss_btn = QPushButton("DISMISS ALERT")
+        self.alert_dismiss_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.alert_dismiss_btn.setMinimumSize(200, 50)
+        self.alert_dismiss_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                font-weight: bold;
+                background-color: #FFEB3B;
+                color: #000000;
+                border: none;
+                border-radius: 8px;
+                padding: 12px 24px;
+            }
+            QPushButton:hover {
+                background-color: #FFF176;
+            }
+            QPushButton:pressed {
+                background-color: #FFD54F;
+            }
+        """)
+        self.alert_dismiss_btn.clicked.connect(self._dismiss_alert)
+        alert_layout.addWidget(self.alert_dismiss_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        # Initialize flash timer for alert
+        self.alert_flash_timer = QTimer(self)
+        self.alert_flash_timer.timeout.connect(self._toggle_alert_flash)
+        # ===== END CRISIS MODE OVERLAY =====
         
         # Control buttons container
         button_container = QWidget()
@@ -772,6 +863,18 @@ class HearingModeWidget(QWidget):
                 data = response.json()
                 transcription = data.get('transcription', '')
                 
+                # ===== CRISIS MODE: Check for safety alerts =====
+                alert = data.get('alert')
+                if alert is not None:
+                    # Safety alert detected! Trigger crisis mode
+                    print(f"[CRISIS MODE] Alert received from backend: {alert}")
+                    self.alert_received.emit(str(alert))
+                else:
+                    # No alert, clear any existing alert if present
+                    if self.current_alert is not None:
+                        self.alert_cleared.emit()
+                # ===== END CRISIS MODE CHECK =====
+                
                 print(f"[DEBUG] Transcription received: '{transcription}'")
                 
                 if transcription.strip():
@@ -874,6 +977,127 @@ class HearingModeWidget(QWidget):
     def clear_captions(self):
         """Clear the caption display."""
         self.caption_display.clear()
+    
+    # ===== CRISIS MODE ALERT METHODS =====
+    
+    def _show_alert_overlay(self, alert_message: str):
+        """
+        Show the crisis mode alert overlay with flashing animation.
+        Called via signal when backend detects an alert (e.g., fire alarm).
+        """
+        self.current_alert = alert_message
+        
+        # Update alert text based on the alert type
+        alert_upper = alert_message.upper()
+        if "FIRE" in alert_upper:
+            self.alert_text_label.setText("DETECTED FIRE ALARM")
+            self.alert_icon_label.setText("🔥")
+        elif "SMOKE" in alert_upper:
+            self.alert_text_label.setText("DETECTED SMOKE ALARM")
+            self.alert_icon_label.setText("💨")
+        elif "CARBON" in alert_upper or "CO" in alert_upper:
+            self.alert_text_label.setText("DETECTED CO ALARM")
+            self.alert_icon_label.setText("☠️")
+        elif "SIREN" in alert_upper or "EMERGENCY" in alert_upper:
+            self.alert_text_label.setText("DETECTED EMERGENCY SIREN")
+            self.alert_icon_label.setText("🚨")
+        elif "DOOR" in alert_upper:
+            self.alert_text_label.setText("DETECTED DOORBELL / KNOCK")
+            self.alert_icon_label.setText("🔔")
+        else:
+            self.alert_text_label.setText("DETECTED ALERT")
+            self.alert_icon_label.setText("⚠️")
+        
+        # Hide the detail label since "DETECTED" is now in the main text
+        self.alert_detail_label.setText("")
+        self.alert_detail_label.setVisible(False)
+        
+        # Position overlay in center of widget
+        self._position_alert_overlay()
+        
+        # Show overlay and start flashing
+        self.alert_overlay.setVisible(True)
+        self.alert_overlay.raise_()  # Bring to front
+        self.alert_flash_state = False
+        self.alert_flash_timer.start(self.ALERT_FLASH_INTERVAL_MS)
+        
+        # Trigger system beep for haptic feedback (runs in background thread)
+        threading.Thread(target=self._play_alert_sound, daemon=True).start()
+        
+        print(f"[CRISIS MODE] Alert activated: {alert_message}")
+    
+    def _hide_alert_overlay(self):
+        """Hide the crisis mode alert overlay."""
+        self.alert_flash_timer.stop()
+        self.alert_overlay.setVisible(False)
+        self.current_alert = None
+        self.alert_flash_state = False
+        
+        # Reset overlay to default red color
+        self.alert_overlay.setStyleSheet("""
+            QFrame#alertOverlay {
+                background-color: #D32F2F;
+                border: 4px solid #FFEB3B;
+                border-radius: 15px;
+            }
+        """)
+        print("[CRISIS MODE] Alert dismissed")
+    
+    def _toggle_alert_flash(self):
+        """Toggle the alert overlay flash state (called by timer)."""
+        self.alert_flash_state = not self.alert_flash_state
+        
+        if self.alert_flash_state:
+            # Flash to bright yellow/orange
+            self.alert_overlay.setStyleSheet("""
+                QFrame#alertOverlay {
+                    background-color: #FF6F00;
+                    border: 4px solid #FFFFFF;
+                    border-radius: 15px;
+                }
+            """)
+        else:
+            # Flash back to red
+            self.alert_overlay.setStyleSheet("""
+                QFrame#alertOverlay {
+                    background-color: #D32F2F;
+                    border: 4px solid #FFEB3B;
+                    border-radius: 15px;
+                }
+            """)
+    
+    def _dismiss_alert(self):
+        """Manually dismiss the alert overlay."""
+        self._hide_alert_overlay()
+    
+    def _position_alert_overlay(self):
+        """Position the alert overlay in the center of the widget."""
+        # Calculate centered position
+        overlay_width = min(500, self.width() - 40)
+        overlay_height = min(300, self.height() - 100)
+        x = (self.width() - overlay_width) // 2
+        y = (self.height() - overlay_height) // 2
+        
+        self.alert_overlay.setGeometry(x, y, overlay_width, overlay_height)
+    
+    def _play_alert_sound(self):
+        """Play system alert sounds for haptic/audio feedback (runs in thread)."""
+        try:
+            # Play attention-grabbing beep pattern
+            for _ in range(3):
+                winsound.Beep(2500, 200)  # High-pitched beep
+                winsound.Beep(1500, 200)  # Lower beep
+        except Exception as e:
+            # winsound may not work on all systems
+            print(f"[CRISIS MODE] Could not play alert sound: {e}")
+    
+    def resizeEvent(self, event):
+        """Handle widget resize to reposition alert overlay."""
+        super().resizeEvent(event)
+        if self.alert_overlay.isVisible():
+            self._position_alert_overlay()
+    
+    # ===== END CRISIS MODE METHODS =====
     
     def showEvent(self, event):
         """Called when widget is shown."""
