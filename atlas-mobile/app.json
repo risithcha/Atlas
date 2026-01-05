@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Atlas",
+    "slug": "atlas-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#1a1a1a"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Atlas needs camera access to detect and describe objects in your environment for vision assistance."
+      }
+    },
+    "android": {
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["android.permission.CAMERA"]
+    },
+    "web": {},
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Atlas needs camera access to detect and describe objects in your environment for vision assistance."
+        }
+      ]
+    ]
+  }
+}
