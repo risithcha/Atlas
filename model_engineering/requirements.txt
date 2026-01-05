@@ -1,0 +1,6 @@
+# Core TensorFlow (CPU version for compatibility)
+tensorflow>=2.10.0,<2.17.0
+# For GPU acceleration (faster conversion): pip install tensorflow[and-cuda]>=2.10.0,<2.17.0
+# NumPy for array operations
+numpy>=1.23.0
+tflite-support>=0.4.4
