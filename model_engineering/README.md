@@ -1,67 +1,39 @@
 # Atlas Model Engineering - TFLite Conversion
 
-This folder contains the AI engineering pipeline for converting pre-trained object detection models to TensorFlow Lite format optimized for mobile deployment.
+This folder contains the AI engineering pipeline for downloading and preparing object detection models in TensorFlow Lite format optimized for mobile deployment.
+
+## Key Change: Using Pre-Converted Models
+
+The script now uses **pre-converted TFLite models** from TensorFlow Hub/Google's model zoo instead of converting TF2 Detection Zoo SavedModels directly.
+
+**Why?** TF2 Detection Zoo SavedModels have **8 raw output tensors** without post-processing, which are incompatible with standard TFLite metadata writers. Pre-converted models have the standard **4-output format** that works with TFLite Task Library.
+
+### Available Models
+
+| Model | Input Size | Speed | Accuracy | Size |
+|-------|------------|-------|----------|------|
+| `ssd_mobilenet_v1` (default) | 300x300 | Fast | Good | ~4 MB |
+| `efficientdet_lite0` | 320x320 | Medium | Better | ~5 MB |
+| `efficientdet_lite2` | 448x448 | Slower | Best | ~12 MB |
+```
 
 ## Overview
 
-The conversion process takes a **MobileNet V2 SSD** model trained on the COCO dataset and:
-1. Downloads the model in TensorFlow SavedModel format
-2. Applies **post-training dynamic range quantization** to shrink the model
-3. Adds **TFLite metadata** (input specs, labels) for mobile SDK compatibility
-4. Outputs a mobile-ready `.tflite` file
+The pipeline now:
+1. Downloads a **pre-converted TFLite model** (with post-processing baked in)
+2. Adds **metadata and labels** if the model does not already include it
+3. Verifies inference on random input and writes a short report
 
-## Why TFLite?
+Default model is `ssd_mobilenet_v1`. Models with `has_metadata: true` (efficientdet_lite0/2) are simply copied after download.
 
-| Aspect | TensorFlow | TensorFlow Lite |
-|--------|------------|-----------------|
-| Target | Servers/Desktop | Mobile/Edge |
-| Size | ~30-200 MB | ~4-20 MB |
-| Latency | Variable | Optimized |
-| Format | SavedModel/HDF5 | .tflite (FlatBuffer) |
+### Output
 
-## Quick Start
-
-### 1. Install Dependencies
-```bash
-cd model_engineering
-pip install -r requirements.txt
-```
-
-### 2. Run Conversion
-```bash
-python convert_model.py
-```
-
-### 3. Output
-The script creates these files in `output/`:
-- `atlas_mobilenet_quant.tflite` - Optimized model with metadata
-- `coco_labels.txt` - Class labels file
-- `conversion_report.json` - Size comparison data
-
-## Model Options
-
-The script supports multiple MobileNet SSD variants:
-
-| Model | Input Size | Speed | Accuracy |
-|-------|------------|-------|----------|
-| `ssd_mobilenet_v2_320` (default) | 320×320 | Fastest | Good |
-| `ssd_mobilenet_v2_fpnlite_320` | 320×320 | Fast | Better |
-| `ssd_mobilenet_v2_fpnlite_640` | 640×640 | Slower | Best |
-
-To change models, you can edit `DEFAULT_MODEL` in `convert_model.py`.
+The script writes to `output/`:
+- `atlas_mobilenet_quant.tflite` — Model with embedded metadata and labels
+- `coco_labels.txt` — COCO label map (91-line format)
+- `conversion_report.json` — Basic model info (size, input dimensions)
 
 ## Technical Details
-
-### Post-Training Quantization
-
-We use **dynamic range quantization** which:
-- Converts 32-bit float weights -> 8-bit integers
-- Reduces model size by ~4x
-- Keeps activations as float (better compatibility)
-
-```python
-converter.optimizations = [tf.lite.Optimize.DEFAULT]
-```
 
 ### Metadata
 
@@ -70,7 +42,7 @@ TFLite metadata tells mobile apps how to use the model:
 ```json
 {
   "input": {
-    "shape": [1, 320, 320, 3],
+    "shape": [1, 300, 300, 3],
     "normalization": {"mean": 127.5, "std": 127.5}
   },
   "outputs": ["boxes", "classes", "scores", "num_detections"],
@@ -79,16 +51,6 @@ TFLite metadata tells mobile apps how to use the model:
 ```
 
 This enables automatic preprocessing in TensorFlow Lite Task Library.
-
-### Expected Results
-
-**Typical Size Reduction:**
-```
-Original SavedModel:  ~33 MB
-Quantized TFLite:     ~8 MB
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Reduction:            ~4x smaller
-```
 
 ## Output Tensors
 

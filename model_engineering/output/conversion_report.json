@@ -1,0 +1,8 @@
+{
+  "model": "ssd_mobilenet_v1",
+  "input_size": 300,
+  "tflite_size_mb": 3.99,
+  "description": "SSD MobileNet V1 300x300 - Quantized, fast",
+  "quantized": true,
+  "has_metadata": true
+}
