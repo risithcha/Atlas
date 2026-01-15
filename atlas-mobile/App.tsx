@@ -6,9 +6,15 @@ import {
   TouchableOpacity,
   SafeAreaView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
-import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
-import { useState } from 'react';
+import { 
+  Camera, 
+  useCameraDevice, 
+  useCameraPermission,
+} from 'react-native-vision-camera';
+import { loadTensorflowModel, TensorflowModel } from 'react-native-fast-tflite';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 // Atlas color scheme
@@ -22,24 +28,162 @@ const COLORS = {
   overlay: 'rgba(0, 0, 0, 0.6)',
 };
 
-export default function App() {
-  const [facing, setFacing] = useState<CameraType>('back');
-  const [permission, requestPermission] = useCameraPermissions();
+// Model configuration
+const MODEL_INPUT_SIZE = 300;
+const CONFIDENCE_THRESHOLD = 0.5;
 
-  // Camera permissions are still loading
-  if (!permission) {
+// COCO labels (subset for common objects)
+const COCO_LABELS: { [key: number]: string } = {
+  0: 'background',
+  1: 'person',
+  2: 'bicycle',
+  3: 'car',
+  4: 'motorcycle',
+  5: 'airplane',
+  6: 'bus',
+  7: 'train',
+  8: 'truck',
+  9: 'boat',
+  10: 'traffic light',
+  11: 'fire hydrant',
+  13: 'stop sign',
+  14: 'parking meter',
+  15: 'bench',
+  16: 'bird',
+  17: 'cat',
+  18: 'dog',
+  19: 'horse',
+  20: 'sheep',
+  21: 'cow',
+  22: 'elephant',
+  23: 'bear',
+  24: 'zebra',
+  25: 'giraffe',
+  27: 'backpack',
+  28: 'umbrella',
+  31: 'handbag',
+  32: 'tie',
+  33: 'suitcase',
+  34: 'frisbee',
+  35: 'skis',
+  36: 'snowboard',
+  37: 'sports ball',
+  38: 'kite',
+  39: 'baseball bat',
+  40: 'baseball glove',
+  41: 'skateboard',
+  42: 'surfboard',
+  43: 'tennis racket',
+  44: 'bottle',
+  46: 'wine glass',
+  47: 'cup',
+  48: 'fork',
+  49: 'knife',
+  50: 'spoon',
+  51: 'bowl',
+  52: 'banana',
+  53: 'apple',
+  54: 'sandwich',
+  55: 'orange',
+  56: 'broccoli',
+  57: 'carrot',
+  58: 'hot dog',
+  59: 'pizza',
+  60: 'donut',
+  61: 'cake',
+  62: 'chair',
+  63: 'couch',
+  64: 'potted plant',
+  65: 'bed',
+  67: 'dining table',
+  70: 'toilet',
+  72: 'tv',
+  73: 'laptop',
+  74: 'mouse',
+  75: 'remote',
+  76: 'keyboard',
+  77: 'cell phone',
+  78: 'microwave',
+  79: 'oven',
+  80: 'toaster',
+  81: 'sink',
+  82: 'refrigerator',
+  84: 'book',
+  85: 'clock',
+  86: 'vase',
+  87: 'scissors',
+  88: 'teddy bear',
+  89: 'hair drier',
+  90: 'toothbrush',
+};
+
+export default function App() {
+  const [facing, setFacing] = useState<'front' | 'back'>('back');
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const device = useCameraDevice(facing);
+  const [modelLoaded, setModelLoaded] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const modelRef = useRef<TensorflowModel | null>(null);
+  const cameraRef = useRef<Camera>(null);
+
+  // Load the TensorFlow Lite model on mount
+  useEffect(() => {
+    async function loadModel() {
+      try {
+        console.log('Loading Atlas TFLite Model...');
+        const model = await loadTensorflowModel(
+          require('./assets/models/atlas_mobilenet_quant.tflite')
+        );
+        modelRef.current = model;
+        setModelLoaded(true);
+        console.log('Atlas TFLite Model loaded successfully!');
+        console.log('Model inputs:', model.inputs);
+        console.log('Model outputs:', model.outputs);
+      } catch (error) {
+        console.error('Failed to load model:', error);
+        setModelError(error instanceof Error ? error.message : 'Unknown error');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadModel();
+  }, []);
+
+  // Toggle camera facing (front/back)
+  const toggleCameraFacing = useCallback(() => {
+    setFacing(current => (current === 'back' ? 'front' : 'back'));
+  }, []);
+
+  // Camera permissions are still loading or model is loading
+  if (isLoading) {
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading...</Text>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Loading Atlas AI...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Model error
+  if (modelError) {
+    return (
+      <View style={styles.container}>
+        <StatusBar style="light" />
+        <View style={styles.loadingContainer}>
+          <Ionicons name="alert-circle" size={64} color="#FF5252" />
+          <Text style={styles.errorTitle}>Model Error</Text>
+          <Text style={styles.loadingText}>{modelError}</Text>
         </View>
       </View>
     );
   }
 
   // Camera permissions are not granted yet
-  if (!permission.granted) {
+  if (!hasPermission) {
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
@@ -53,7 +197,7 @@ export default function App() {
           {/* Permission Request */}
           <View style={styles.permissionContent}>
             <View style={styles.cameraIconContainer}>
-              <Text style={styles.cameraIcon}>📷</Text>
+              <Ionicons name="camera" size={48} color={COLORS.primary} />
             </View>
             <Text style={styles.permissionTitle}>Camera Access Required</Text>
             <Text style={styles.permissionMessage}>
@@ -72,9 +216,17 @@ export default function App() {
     );
   }
 
-  // Toggle camera facing (front/back)
-  function toggleCameraFacing() {
-    setFacing(current => (current === 'back' ? 'front' : 'back'));
+  // No camera device found
+  if (device == null) {
+    return (
+      <View style={styles.container}>
+        <StatusBar style="light" />
+        <View style={styles.loadingContainer}>
+          <Ionicons name="camera" size={64} color={COLORS.textMuted} />
+          <Text style={styles.loadingText}>No camera device found</Text>
+        </View>
+      </View>
+    );
   }
 
   // Main camera view
@@ -83,44 +235,46 @@ export default function App() {
       <StatusBar style="light" />
       
       {/* Camera View - Full Screen */}
-      <CameraView 
-        style={styles.camera} 
-        facing={facing}
-      >
-        {/* Top Overlay */}
-        <SafeAreaView style={styles.topOverlay}>
-          <View style={styles.topBar}>
-            <Text style={styles.logoTextSmall}>ATLAS</Text>
-            <TouchableOpacity 
-              style={styles.flipButton} 
-              onPress={toggleCameraFacing}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="camera-reverse-outline" size={28} color="#ffffff" />
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
+      <Camera 
+        ref={cameraRef}
+        style={StyleSheet.absoluteFill}
+        device={device}
+        isActive={true}
+        photo={true}
+      />
 
-        {/* Bottom Overlay with Controls */}
-        <View style={styles.bottomOverlay}>
-          {/* Detect Objects Button */}
+      {/* Top Overlay */}
+      <SafeAreaView style={styles.topOverlay}>
+        <View style={styles.topBar}>
+          <Text style={styles.logoTextSmall}>ATLAS</Text>
           <TouchableOpacity 
-            style={styles.detectButton}
-            activeOpacity={0.8}
-            onPress={() => {
-              // Placeholder - will connect to backend later
-              console.log('Detect Objects pressed');
-            }}
+            style={styles.flipButton} 
+            onPress={toggleCameraFacing}
+            activeOpacity={0.7}
           >
-            <Text style={styles.detectButtonText}>Detect Objects</Text>
+            <Ionicons name="camera-reverse-outline" size={28} color="#ffffff" />
           </TouchableOpacity>
+        </View>
+      </SafeAreaView>
 
-          {/* Status Text */}
+      {/* Bottom Overlay with Status */}
+      <View style={styles.bottomOverlay}>
+        {/* Status Indicator */}
+        <View style={styles.statusContainer}>
+          <View style={[
+            styles.statusDot,
+            { backgroundColor: modelLoaded ? COLORS.primary : COLORS.textMuted }
+          ]} />
           <Text style={styles.statusText}>
-            Point camera at objects • Tap to detect
+            {modelLoaded ? 'AI Ready • Camera active' : 'Loading model...'}
           </Text>
         </View>
-      </CameraView>
+
+        {/* Model Info */}
+        <Text style={styles.fpsText}>
+          Model: {MODEL_INPUT_SIZE}x{MODEL_INPUT_SIZE} UINT8
+        </Text>
+      </View>
     </View>
   );
 }
@@ -136,10 +290,19 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 40,
   },
   loadingText: {
+    color: COLORS.textMuted,
+    fontSize: 16,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  errorTitle: {
     color: COLORS.text,
-    fontSize: 18,
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginTop: 16,
   },
 
   // Permission Screen
@@ -179,9 +342,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 30,
   },
-  cameraIcon: {
-    fontSize: 48,
-  },
   permissionTitle: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -209,11 +369,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     textAlign: 'center',
-  },
-
-  // Camera View
-  camera: {
-    flex: 1,
   },
   
   // Top Overlay
@@ -258,28 +413,26 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     alignItems: 'center',
   },
-  detectButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 30,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    marginBottom: 16,
-    // Shadow for iOS
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    // Shadow for Android
-    elevation: 8,
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
-  detectButtonText: {
-    color: COLORS.text,
-    fontSize: 20,
-    fontWeight: 'bold',
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
   },
   statusText: {
-    color: COLORS.textMuted,
-    fontSize: 14,
+    color: COLORS.text,
+    fontSize: 16,
     textAlign: 'center',
+  },
+  fpsText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
   },
 });

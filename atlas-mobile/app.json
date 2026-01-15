@@ -12,22 +12,44 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Atlas needs camera access to detect and describe objects in your environment for vision assistance."
-      }
+        "NSCameraUsageDescription": "Atlas needs camera access to detect and describe objects in your environment for vision assistance.",
+        "NSMicrophoneUsageDescription": "Atlas needs microphone access for audio features.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.risithcha.atlasmobile"
     },
     "android": {
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.risithcha.atlasmobile"
     },
     "web": {},
     "plugins": [
       [
-        "expo-camera",
+        "react-native-vision-camera",
         {
-          "cameraPermission": "Atlas needs camera access to detect and describe objects in your environment for vision assistance."
+          "cameraPermissionText": "Atlas needs camera access to detect and describe objects in your environment for vision assistance.",
+          "enableMicrophonePermission": true,
+          "microphonePermissionText": "Atlas needs microphone access for audio features."
         }
-      ]
-    ]
+      ],
+      [
+        "react-native-fast-tflite",
+        {
+          "enableCoreMLDelegate": true,
+          "enableAndroidGpuLibraries": true
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "8ce24257-018a-4c4b-8a6f-a4cdbd525423"
+      }
+    }
   }
 }
