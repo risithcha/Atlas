@@ -82,7 +82,7 @@ This format is required because **SSD MobileNet models from TF Object Detection 
 
 ### Normalization Parameters
 
-**Source:** [mobile_ssd_tflite_client.cc](https://github.com/tensorflow/models/blob/main/research/lstm_object_detection/tflite/mobile_ssd_tflite_client.cc#L148-L156)
+**Source:** [mobile_ssd_tflite_client.cc](https://github.com/tensorflow/models/blob/master/research/lstm_object_detection/tflite/mobile_ssd_tflite_client.cc#L148-L156)
 
 ```cpp
 void MobileSSDTfLiteClient::SetImageNormalizationParams() {
@@ -96,7 +96,7 @@ void MobileSSDTfLiteClient::SetImageNormalizationParams() {
 - Formula: `normalized = (pixel - 127.5) / 127.5`
 - Input 0 → -1.0, Input 127.5 → 0.0, Input 255 → 1.0
 
-**Additional Verification:** [TensorFlow Object Detection TFLite Tutorial](https://github.com/tensorflow/models/blob/main/research/object_detection/colab_tutorials/convert_odt_model_to_TFLite.ipynb)
+**Additional Verification:** [TensorFlow Object Detection TFLite Tutorial](https://github.com/tensorflow/models/blob/master/research/object_detection/colab_tutorials/convert_odt_model_to_TFLite.ipynb)
 > "As the SSD MobileNet V2 FPNLite 640x640 model takes input image with pixel value in the range of [-1..1], we need to set `norm_mean = 127.5` and `norm_std = 127.5`."
 
 ### Why We Embed Metadata?
