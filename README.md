@@ -68,11 +68,11 @@ Our solution to this problem is Atlas. Atlas is a unified, offline-capable acces
 
 Atlas uses a hybrid client–server architecture that separates the user interface from the heavy AI processing. This design ensures that intensive model processing never blocks or freezes the frontend during real-time use.
 
-<!-- imma put a flowchart here later -->
+![Architecture Diagram](Architecture.svg)
 
 ### Backend Processing Pipeline
 
-<!-- working on flowchart rn will have later-->
+![Backend Processing Pipeline](Backend%20Processing%20Pipeline.svg)
 
 ---
 
@@ -160,7 +160,7 @@ We built an experimental React Native app and engineered a custom Quantized TFLi
 **Current Status:**
 We were able to confirm that the 3.99MB quantized model loads successfully into Android memory and that tensor decoding functions correctly. Real-time frame processing is built but disabled in v1.0 for stability.
 
-<!-- same thing man, working on flowchart rn -->
+![Mobile R&D Architecture](Mobile%20RD.svg)
 
 ---
 
