@@ -32,7 +32,8 @@ Our solution to this problem is Atlas. Atlas is a unified, offline-capable acces
   Generates natural descriptions like *“I see a person, a laptop, and a coffee cup.”*
 
 * **OCR Text Reader**
-  Reads printed text from menus, signs, and documents aloud using EasyOCR.
+  Reads printed text from menus, signs, and documents using EasyOCR.
+  <!-- It doesn't read aloud yet. Needs to be implemented. -->
 
 
 * **Live Video Overlay**
