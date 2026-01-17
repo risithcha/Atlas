@@ -9,11 +9,11 @@
 ## The Challenge
 
 
-Atlas was devleoped in response to the 2026 TSA Software Development theme.
+Atlas was developed in response to the 2026 TSA Software Development theme.
 
 The challenge asked us to design software that improves Accessibility. When analyzing existing solutions, we found a clear technical limitation: most accessibility tools are either separate (vision or hearing) or heavily dependent on cloud APIs, which makes them unreliable in environments without stable internet access.
 
-Our solution to this problem is Atlas. Atlas is a unified, offline-capable accessibility assitant designed to run locally on standard hardware. By leveraging optimized edge AI, the system delivers real-time sensory assistance without relying on cloud infrastructure, reducing latency while improving reliability.
+Our solution to this problem is Atlas. Atlas is a unified, offline-capable accessibility assistant designed to run locally on standard hardware. By leveraging optimized edge AI, the system delivers real-time sensory assistance without relying on cloud infrastructure, reducing latency while improving reliability.
 
 ---
 
@@ -25,7 +25,7 @@ Our solution to this problem is Atlas. Atlas is a unified, offline-capable acces
 
 
 * **Low-Latency Object Detection**
-  Spots obstacles and items usnig a local MobileNet-SSD model.
+  Spots obstacles and items using a local MobileNet-SSD model.
 
 
 * **“What am I looking at?” Descriptions**
@@ -37,7 +37,7 @@ Our solution to this problem is Atlas. Atlas is a unified, offline-capable acces
 
 
 * **Live Video Overlay**
-  Displays bounding boxes and labels so users can see exactly what the AI is detecing in real time. (This is mainly for us to test, but also for caretakers).
+  Displays bounding boxes and labels so users can see exactly what the AI is detecting in real time. (This is mainly for us to test, but also for caretakers).
 
 ### Hearing Assist Mode
 
@@ -48,7 +48,7 @@ Our solution to this problem is Atlas. Atlas is a unified, offline-capable acces
 
 
 * **Safety Alert System**
-  We engineered a custom sound classifier that listens for Fire Alarms, Sirens, and Doorbells and triggers visual warnings if danger is deteced.
+  We engineered a custom sound classifier that listens for Fire Alarms, Sirens, and Doorbells and triggers visual warnings if danger is detected.
 
 * **Multi-Language Support**
   Automatically identifies the spoken language during transcription.
@@ -61,7 +61,7 @@ Our solution to this problem is Atlas. Atlas is a unified, offline-capable acces
 
 
 * **Full Keyboard Navigation**
-  The application can be operated entirley without a mouse.
+  The application can be operated entirely without a mouse.
 
 ---
 
@@ -201,4 +201,4 @@ Thank you for taking the time to review our project!
 
 Building Atlas pushed us to learn entirely new frameworks, design for real-world constraints, and dive deep into AI engineering. It was a challenging but incredibly rewarding experience to turn this idea into a working product.
 
-We appreciate your time and consideratoin!
+We appreciate your time and consideration!
