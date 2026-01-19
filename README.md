@@ -1,7 +1,8 @@
 <h1 align="center">Atlas</h1>
 
 <p align="center">
-  <strong>TSA Software Development 2026 Entry</strong>
+  <strong>Event:</strong> Software Development<br>
+  <strong>Team #:</strong> SDHS~21361-3
 </p>
 
 ---
