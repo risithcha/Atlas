@@ -33,7 +33,6 @@ Our solution to this problem is Atlas. Atlas is a unified, offline-capable acces
 
 * **OCR Text Reader**
   Reads printed text from menus, signs, and documents using EasyOCR.
-  <!-- It doesn't read aloud yet. Needs to be implemented. -->
 
 
 * **Live Video Overlay**
