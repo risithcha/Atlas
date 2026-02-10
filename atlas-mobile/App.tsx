@@ -1,23 +1,36 @@
 import { StatusBar } from 'expo-status-bar';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
+import {
+  StyleSheet,
+  Text,
+  View,
   TouchableOpacity,
   SafeAreaView,
   Platform,
   ActivityIndicator,
+  Dimensions,
+  type ViewStyle,
 } from 'react-native';
-import { 
-  Camera, 
-  useCameraDevice, 
+import {
+  Camera,
+  useCameraDevice,
   useCameraPermission,
+  useFrameProcessor,
+  runAtTargetFps,
 } from 'react-native-vision-camera';
-import { loadTensorflowModel, TensorflowModel } from 'react-native-fast-tflite';
+import { useTensorflowModel } from 'react-native-fast-tflite';
+import { useResizePlugin } from 'vision-camera-resize-plugin';
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { Worklets } from 'react-native-worklets-core';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import {
+  decodePredictions,
+  type Detection,
+  type TFLiteOutputs,
+} from './src/utils/tensor_decoder';
 
-// Atlas color scheme
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 const COLORS = {
   background: '#1a1a1a',
   primary: '#4CAF50',       // Atlas green
@@ -28,135 +41,158 @@ const COLORS = {
   overlay: 'rgba(0, 0, 0, 0.6)',
 };
 
-// Model configuration
-const MODEL_INPUT_SIZE = 300;
-const CONFIDENCE_THRESHOLD = 0.5;
+const MODEL_INPUT_SIZE = 300;      // Our quantized model expects 300x300
+const CONFIDENCE_THRESHOLD = 0.45; // Min score to show a detection
+const MAX_DETECTIONS = 10;         // Cap results per frame
+const INFERENCE_FPS = 5;           // How many times/sec we run the model
 
-// COCO labels (subset for common objects)
-const COCO_LABELS: { [key: number]: string } = {
-  0: 'background',
-  1: 'person',
-  2: 'bicycle',
-  3: 'car',
-  4: 'motorcycle',
-  5: 'airplane',
-  6: 'bus',
-  7: 'train',
-  8: 'truck',
-  9: 'boat',
-  10: 'traffic light',
-  11: 'fire hydrant',
-  13: 'stop sign',
-  14: 'parking meter',
-  15: 'bench',
-  16: 'bird',
-  17: 'cat',
-  18: 'dog',
-  19: 'horse',
-  20: 'sheep',
-  21: 'cow',
-  22: 'elephant',
-  23: 'bear',
-  24: 'zebra',
-  25: 'giraffe',
-  27: 'backpack',
-  28: 'umbrella',
-  31: 'handbag',
-  32: 'tie',
-  33: 'suitcase',
-  34: 'frisbee',
-  35: 'skis',
-  36: 'snowboard',
-  37: 'sports ball',
-  38: 'kite',
-  39: 'baseball bat',
-  40: 'baseball glove',
-  41: 'skateboard',
-  42: 'surfboard',
-  43: 'tennis racket',
-  44: 'bottle',
-  46: 'wine glass',
-  47: 'cup',
-  48: 'fork',
-  49: 'knife',
-  50: 'spoon',
-  51: 'bowl',
-  52: 'banana',
-  53: 'apple',
-  54: 'sandwich',
-  55: 'orange',
-  56: 'broccoli',
-  57: 'carrot',
-  58: 'hot dog',
-  59: 'pizza',
-  60: 'donut',
-  61: 'cake',
-  62: 'chair',
-  63: 'couch',
-  64: 'potted plant',
-  65: 'bed',
-  67: 'dining table',
-  70: 'toilet',
-  72: 'tv',
-  73: 'laptop',
-  74: 'mouse',
-  75: 'remote',
-  76: 'keyboard',
-  77: 'cell phone',
-  78: 'microwave',
-  79: 'oven',
-  80: 'toaster',
-  81: 'sink',
-  82: 'refrigerator',
-  84: 'book',
-  85: 'clock',
-  86: 'vase',
-  87: 'scissors',
-  88: 'teddy bear',
-  89: 'hair drier',
-  90: 'toothbrush',
-};
+// Palette for bounding-box colours (one per class-id, wraps around)
+const BOX_COLORS = [
+  '#4CAF50', '#2196F3', '#FF9800', '#E91E63', '#9C27B0',
+  '#00BCD4', '#FFEB3B', '#FF5722', '#795548', '#607D8B',
+];
 
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+
+// ---------------------------------------------------------------------------
+// Bounding-box overlay component
+// ---------------------------------------------------------------------------
+function DetectionOverlay({ detections }: { detections: Detection[] }) {
+  if (detections.length === 0) return null;
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {detections.map((det, idx) => {
+        const color = BOX_COLORS[det.classId % BOX_COLORS.length];
+        const pct = Math.round(det.score * 100);
+
+        // Model outputs normalised coords [0-1] as {top,left,bottom,right}
+        const boxStyle: ViewStyle = {
+          position: 'absolute',
+          left: `${det.box.left * 100}%` as unknown as number,
+          top: `${det.box.top * 100}%` as unknown as number,
+          width: `${(det.box.right - det.box.left) * 100}%` as unknown as number,
+          height: `${(det.box.bottom - det.box.top) * 100}%` as unknown as number,
+          borderWidth: 2,
+          borderColor: color,
+          borderRadius: 4,
+        };
+
+        return (
+          <View key={`${det.label}-${idx}`} style={boxStyle}>
+            <View style={[styles.labelBadge, { backgroundColor: color }]}>
+              <Text style={styles.labelText} numberOfLines={1}>
+                {det.label} {pct}%
+              </Text>
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main App
+// ---------------------------------------------------------------------------
 export default function App() {
   const [facing, setFacing] = useState<'front' | 'back'>('back');
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice(facing);
-  const [modelLoaded, setModelLoaded] = useState(false);
-  const [modelError, setModelError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const modelRef = useRef<TensorflowModel | null>(null);
-  const cameraRef = useRef<Camera>(null);
 
-  // Load the TensorFlow Lite model on mount
-  useEffect(() => {
-    async function loadModel() {
-      try {
-        console.log('Loading Atlas TFLite Model...');
-        const model = await loadTensorflowModel(
-          require('./assets/models/atlas_mobilenet_quant.tflite')
-        );
-        modelRef.current = model;
-        setModelLoaded(true);
-        console.log('Atlas TFLite Model loaded successfully!');
-        console.log('Model inputs:', model.inputs);
-        console.log('Model outputs:', model.outputs);
-      } catch (error) {
-        console.error('Failed to load model:', error);
-        setModelError(error instanceof Error ? error.message : 'Unknown error');
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    loadModel();
-  }, []);
+  // --- Model loading via hook (manages state internally) ---
+  const tfModel = useTensorflowModel(
+    require('./assets/models/atlas_mobilenet_quant.tflite'),
+  );
+  const model = tfModel.state === 'loaded' ? tfModel.model : undefined;
+
+  // --- Resize plugin (GPU-accelerated frame -> 300×300 RGB uint8) ---
+  const { resize } = useResizePlugin();
+
+  // --- Detection state (updated from worklet thread -> JS thread) ---
+  const [detections, setDetections] = useState<Detection[]>([]);
+  const [fps, setFps] = useState(0);
+  const lastInferenceRef = useRef(Date.now());
+
+  // Bridge: worklet -> JS thread.  Receives raw output arrays, decodes on
+  // the JS thread (cheap), then updates React state.
+  const onDetectionResults = Worklets.createRunOnJS(
+    (
+      rawBoxes: number[],
+      rawClasses: number[],
+      rawScores: number[],
+      rawCount: number,
+    ) => {
+      const now = Date.now();
+      const delta = now - lastInferenceRef.current;
+      lastInferenceRef.current = now;
+      if (delta > 0) setFps(Math.round(1000 / delta));
+
+      const outputs: TFLiteOutputs = {
+        boxes: rawBoxes,
+        classes: rawClasses,
+        scores: rawScores,
+        count: rawCount,
+      };
+
+      const results = decodePredictions(outputs, {
+        threshold: CONFIDENCE_THRESHOLD,
+        maxDetections: MAX_DETECTIONS,
+      });
+
+      setDetections(results);
+    },
+  );
+
+  // --- Frame Processor (runs on worklet thread) ---
+  const frameProcessor = useFrameProcessor(
+    (frame) => {
+      'worklet';
+      if (model == null) return;
+
+      // Throttle heavy inference so the camera stays at full preview FPS
+      runAtTargetFps(INFERENCE_FPS, () => {
+        'worklet';
+
+        // Resize the camera frame -> 300×300 RGB uint8
+        // The resize plugin handles YUV->RGB conversion + center-crop + scale
+        const resized = resize(frame, {
+          scale: {
+            width: MODEL_INPUT_SIZE,
+            height: MODEL_INPUT_SIZE,
+          },
+          pixelFormat: 'rgb',
+          dataType: 'uint8',
+        });
+
+        // Run synchronous inference on the worklet thread (off UI thread)
+        const outputs = model.runSync([resized]);
+
+        // Extract raw arrays (small – typically 10 detections)
+        // Convert from TypedArrays to plain arrays so they cross the
+        // worklet->JS bridge without issues.
+        const rawBoxes = Array.from(outputs[0] as unknown as number[]);
+        const rawClasses = Array.from(outputs[1] as unknown as number[]);
+        const rawScores = Array.from(outputs[2] as unknown as number[]);
+        const rawCount = outputs[3]
+          ? (outputs[3] as unknown as number[])[0]
+          : 0;
+
+        // Send to JS thread for decoding + state update
+        onDetectionResults(rawBoxes, rawClasses, rawScores, rawCount);
+      });
+    },
+    [model, resize, onDetectionResults],
+  );
 
   // Toggle camera facing (front/back)
   const toggleCameraFacing = useCallback(() => {
-    setFacing(current => (current === 'back' ? 'front' : 'back'));
+    setFacing((c) => (c === 'back' ? 'front' : 'back'));
   }, []);
 
-  // Camera permissions are still loading or model is loading
-  if (isLoading) {
+  // --- Render: loading / error / permission / camera ---
+
+  if (tfModel.state === 'loading') {
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
@@ -168,15 +204,16 @@ export default function App() {
     );
   }
 
-  // Model error
-  if (modelError) {
+  if (tfModel.state === 'error') {
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.loadingContainer}>
           <Ionicons name="alert-circle" size={64} color="#FF5252" />
           <Text style={styles.errorTitle}>Model Error</Text>
-          <Text style={styles.loadingText}>{modelError}</Text>
+          <Text style={styles.loadingText}>
+            {tfModel.error?.message ?? 'Unknown error'}
+          </Text>
         </View>
       </View>
     );
@@ -203,8 +240,8 @@ export default function App() {
             <Text style={styles.permissionMessage}>
               Atlas needs access to your camera to detect and describe objects in your environment.
             </Text>
-            <TouchableOpacity 
-              style={styles.permissionButton} 
+            <TouchableOpacity
+              style={styles.permissionButton}
               onPress={requestPermission}
               activeOpacity={0.8}
             >
@@ -229,26 +266,37 @@ export default function App() {
     );
   }
 
-  // Main camera view
+  // ---- Main camera view with live detection overlay ----
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      
-      {/* Camera View - Full Screen */}
-      <Camera 
-        ref={cameraRef}
+
+      {/* Camera – full screen, feeds frames into our processor */}
+      <Camera
         style={StyleSheet.absoluteFill}
         device={device}
         isActive={true}
-        photo={true}
+        frameProcessor={frameProcessor}
+        pixelFormat="yuv"
       />
 
-      {/* Top Overlay */}
+      {/* Bounding-box overlay */}
+      <DetectionOverlay detections={detections} />
+
+      {/* Top bar */}
       <SafeAreaView style={styles.topOverlay}>
         <View style={styles.topBar}>
           <Text style={styles.logoTextSmall}>ATLAS</Text>
-          <TouchableOpacity 
-            style={styles.flipButton} 
+
+          {/* Detection count badge */}
+          {detections.length > 0 && (
+            <View style={styles.countBadge}>
+              <Text style={styles.countText}>{detections.length}</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={styles.flipButton}
             onPress={toggleCameraFacing}
             activeOpacity={0.7}
           >
@@ -259,32 +307,53 @@ export default function App() {
 
       {/* Bottom Overlay with Status */}
       <View style={styles.bottomOverlay}>
-        {/* Status Indicator */}
         <View style={styles.statusContainer}>
-          <View style={[
-            styles.statusDot,
-            { backgroundColor: modelLoaded ? COLORS.primary : COLORS.textMuted }
-          ]} />
+          <View
+            style={[
+              styles.statusDot,
+              {
+                backgroundColor:
+                  model != null ? COLORS.primary : COLORS.textMuted,
+              },
+            ]}
+          />
           <Text style={styles.statusText}>
-            {modelLoaded ? 'AI Ready • Camera active' : 'Loading model...'}
+            {model != null
+              ? `Detecting • ${fps} inf/s`
+              : 'Loading model...'}
           </Text>
         </View>
 
         {/* Model Info */}
         <Text style={styles.fpsText}>
-          Model: {MODEL_INPUT_SIZE}x{MODEL_INPUT_SIZE} UINT8
+          Model: {MODEL_INPUT_SIZE}x{MODEL_INPUT_SIZE} UINT8 •{' '}
+          {detections.length} object{detections.length !== 1 ? 's' : ''}
         </Text>
+
+        {/* Mini detection list */}
+        {detections.length > 0 && (
+          <View style={styles.detectionList}>
+            {detections.slice(0, 3).map((d, i) => (
+              <Text key={i} style={styles.detectionItem}>
+                {d.label} ({Math.round(d.score * 100)}%)
+              </Text>
+            ))}
+          </View>
+        )}
       </View>
     </View>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  
+
   // Loading State
   loadingContainer: {
     flex: 1,
@@ -370,7 +439,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
   },
-  
+
   // Top Overlay
   topOverlay: {
     position: 'absolute',
@@ -402,7 +471,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  // Bottom Overlay
+  // Detection count badge (top bar)
+  countBadge: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    minWidth: 24,
+    alignItems: 'center',
+  },
+  countText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+
+  // Bottom overlay
   bottomOverlay: {
     position: 'absolute',
     bottom: 0,
@@ -410,13 +494,13 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: COLORS.overlay,
     paddingBottom: Platform.OS === 'ios' ? 40 : 30,
-    paddingTop: 20,
+    paddingTop: 16,
     alignItems: 'center',
   },
   statusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   statusDot: {
     width: 10,
@@ -434,5 +518,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
     marginTop: 4,
+  },
+
+  // Mini detection list at the bottom
+  detectionList: {
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  detectionItem: {
+    color: COLORS.text,
+    fontSize: 13,
+    opacity: 0.85,
+  },
+
+  // Bounding-box label badge
+  labelBadge: {
+    position: 'absolute',
+    top: -18,
+    left: -2,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  labelText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });
