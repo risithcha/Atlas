@@ -24,8 +24,11 @@ import { Worklets } from 'react-native-worklets-core';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   decodePredictions,
+  filterByMinArea,
+  mapBoxToScreen,
   type Detection,
   type TFLiteOutputs,
+  type FrameInfo,
 } from './src/utils/tensor_decoder';
 
 // ---------------------------------------------------------------------------
@@ -45,6 +48,7 @@ const MODEL_INPUT_SIZE = 300;      // Our quantized model expects 300x300
 const CONFIDENCE_THRESHOLD = 0.45; // Min score to show a detection
 const MAX_DETECTIONS = 10;         // Cap results per frame
 const INFERENCE_FPS = 5;           // How many times/sec we run the model
+const MIN_BOX_AREA = 0.005;        // Filter out tiny noise detections
 
 // Palette for bounding-box colours (one per class-id, wraps around)
 const BOX_COLORS = [
@@ -57,8 +61,13 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 // ---------------------------------------------------------------------------
 // Bounding-box overlay component
 // ---------------------------------------------------------------------------
-function DetectionOverlay({ detections }: { detections: Detection[] }) {
-  if (detections.length === 0) return null;
+interface DetectionOverlayProps {
+  detections: Detection[];
+  frameInfo: FrameInfo | null;
+}
+
+function DetectionOverlay({ detections, frameInfo }: DetectionOverlayProps) {
+  if (detections.length === 0 || frameInfo == null) return null;
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -66,21 +75,42 @@ function DetectionOverlay({ detections }: { detections: Detection[] }) {
         const color = BOX_COLORS[det.classId % BOX_COLORS.length];
         const pct = Math.round(det.score * 100);
 
-        // Model outputs normalised coords [0-1] as {top,left,bottom,right}
+        // Map model coords -> screen pixels, accounting for center-crop,
+        // buffer rotation, and camera preview "cover" mode.
+        const screenBox = mapBoxToScreen(
+          det.box,
+          frameInfo,
+          SCREEN_W,
+          SCREEN_H,
+          MODEL_INPUT_SIZE,
+        );
+
         const boxStyle: ViewStyle = {
           position: 'absolute',
-          left: `${det.box.left * 100}%` as unknown as number,
-          top: `${det.box.top * 100}%` as unknown as number,
-          width: `${(det.box.right - det.box.left) * 100}%` as unknown as number,
-          height: `${(det.box.bottom - det.box.top) * 100}%` as unknown as number,
+          left: screenBox.x,
+          top: screenBox.y,
+          width: screenBox.width,
+          height: screenBox.height,
           borderWidth: 2,
           borderColor: color,
           borderRadius: 4,
         };
 
+        // Place the label inside the box at the top if the box is too
+        // close to the top of the screen, otherwise above the box.
+        const labelAbove = screenBox.y > 22;
+
         return (
           <View key={`${det.label}-${idx}`} style={boxStyle}>
-            <View style={[styles.labelBadge, { backgroundColor: color }]}>
+            <View
+              style={[
+                styles.labelBadge,
+                { backgroundColor: color },
+                labelAbove
+                  ? { top: -18, left: -2 }
+                  : { top: 2, left: 2 },
+              ]}
+            >
               <Text style={styles.labelText} numberOfLines={1}>
                 {det.label} {pct}%
               </Text>
@@ -111,22 +141,33 @@ export default function App() {
 
   // --- Detection state (updated from worklet thread -> JS thread) ---
   const [detections, setDetections] = useState<Detection[]>([]);
+  const [frameInfo, setFrameInfo] = useState<FrameInfo | null>(null);
   const [fps, setFps] = useState(0);
   const lastInferenceRef = useRef(Date.now());
 
-  // Bridge: worklet -> JS thread.  Receives raw output arrays, decodes on
-  // the JS thread (cheap), then updates React state.
+  // Bridge: worklet -> JS thread.  Receives raw output arrays + frame
+  // dimensions, decodes on the JS thread (cheap), then updates React state.
   const onDetectionResults = Worklets.createRunOnJS(
     (
       rawBoxes: number[],
       rawClasses: number[],
       rawScores: number[],
       rawCount: number,
+      fWidth: number,
+      fHeight: number,
+      fOrientation: string,
     ) => {
       const now = Date.now();
       const delta = now - lastInferenceRef.current;
       lastInferenceRef.current = now;
       if (delta > 0) setFps(Math.round(1000 / delta));
+
+      // Store frame info for coordinate mapping in the overlay
+      setFrameInfo({
+        frameWidth: fWidth,
+        frameHeight: fHeight,
+        frameOrientation: fOrientation,
+      });
 
       const outputs: TFLiteOutputs = {
         boxes: rawBoxes,
@@ -135,10 +176,13 @@ export default function App() {
         count: rawCount,
       };
 
-      const results = decodePredictions(outputs, {
+      let results = decodePredictions(outputs, {
         threshold: CONFIDENCE_THRESHOLD,
         maxDetections: MAX_DETECTIONS,
       });
+
+      // Filter out tiny noise detections
+      results = filterByMinArea(results, MIN_BOX_AREA);
 
       setDetections(results);
     },
@@ -154,13 +198,27 @@ export default function App() {
       runAtTargetFps(INFERENCE_FPS, () => {
         'worklet';
 
-        // Resize the camera frame -> 300×300 RGB uint8
-        // The resize plugin handles YUV->RGB conversion + center-crop + scale
+        // Compute rotation so the model always sees upright (portrait) content.
+        // The raw camera buffer is typically landscape; without rotation the model
+        // receives sideways images, destroying both classification and localisation.
+        const orientation = frame.orientation;
+        const rotation =
+          orientation === 'landscape-left'
+            ? '90deg'
+            : orientation === 'landscape-right'
+              ? '270deg'
+              : orientation === 'portrait-upside-down'
+                ? '180deg'
+                : '0deg';
+
+        // Resize the camera frame -> 300x300 RGB uint8
+        // Pipeline: center-crop (1:1 on raw buffer) -> scale -> rotate
         const resized = resize(frame, {
           scale: {
             width: MODEL_INPUT_SIZE,
             height: MODEL_INPUT_SIZE,
           },
+          rotation,
           pixelFormat: 'rgb',
           dataType: 'uint8',
         });
@@ -179,7 +237,16 @@ export default function App() {
           : 0;
 
         // Send to JS thread for decoding + state update
-        onDetectionResults(rawBoxes, rawClasses, rawScores, rawCount);
+        // Include frame dimensions & orientation for coordinate mapping
+        onDetectionResults(
+          rawBoxes,
+          rawClasses,
+          rawScores,
+          rawCount,
+          frame.width,
+          frame.height,
+          frame.orientation,
+        );
       });
     },
     [model, resize, onDetectionResults],
@@ -278,10 +345,11 @@ export default function App() {
         isActive={true}
         frameProcessor={frameProcessor}
         pixelFormat="yuv"
+        resizeMode="cover"
       />
 
       {/* Bounding-box overlay */}
-      <DetectionOverlay detections={detections} />
+      <DetectionOverlay detections={detections} frameInfo={frameInfo} />
 
       {/* Top bar */}
       <SafeAreaView style={styles.topOverlay}>
@@ -319,7 +387,7 @@ export default function App() {
           />
           <Text style={styles.statusText}>
             {model != null
-              ? `Detecting • ${fps} inf/s`
+              ? `Detecting \u2022 ${fps} inf/s`
               : 'Loading model...'}
           </Text>
         </View>
@@ -534,8 +602,6 @@ const styles = StyleSheet.create({
   // Bounding-box label badge
   labelBadge: {
     position: 'absolute',
-    top: -18,
-    left: -2,
     paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 3,

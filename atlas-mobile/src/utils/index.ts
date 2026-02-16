@@ -8,6 +8,7 @@ export {
   toPixelCoordinates,
   getBoxCenter,
   getBoxArea,
+  mapBoxToScreen,
   // Formatting and filtering
   formatDetection,
   filterByClass,
@@ -19,6 +20,8 @@ export {
   type Detection,
   type TFLiteOutputs,
   type DecoderOptions,
+  type ScreenBox,
+  type FrameInfo,
   // Default
   default as TensorDecoder,
 } from './tensor_decoder';

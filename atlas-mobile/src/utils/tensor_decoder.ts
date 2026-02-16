@@ -167,7 +167,10 @@ export function decodePredictions(
     }
 
     // Get class ID and label
-    const classId = Math.round(classes[i]);
+    // SSD MobileNet V1 outputs 0-indexed class IDs
+    // but COCO_CLASSES is 1-indexed, so we add 1.
+    const rawClassId = Math.round(classes[i]);
+    const classId = rawClassId + 1;
     const label = classLabels[classId] ?? `class_${classId}`;
 
     // Skip unknown/background classes
@@ -287,6 +290,96 @@ export function filterByMinArea(
   return detections.filter(d => getBoxArea(d.box) >= minArea);
 }
 
+// ---------------------------------------------------------------------------
+// Screen-space bounding box (pixel coordinates, ready for overlay rendering)
+// ---------------------------------------------------------------------------
+export interface ScreenBox {
+  x: number;       // left edge in pixels
+  y: number;       // top edge in pixels
+  width: number;   // width in pixels
+  height: number;  // height in pixels
+}
+
+// Frame information needed for coordinate mapping
+export interface FrameInfo {
+  frameWidth: number;        // raw camera buffer width (before rotation)
+  frameHeight: number;       // raw camera buffer height (before rotation)
+  frameOrientation: string;  // e.g. 'landscape-left', 'landscape-right', 'portrait'
+}
+
+/**
+ * Map a model's normalized bounding box [0-1] to screen-space pixel coordinates.
+ *
+ * Prerequisite: the resize plugin is called with the correct `rotation` parameter
+ * so the model receives upright (portrait-oriented) content.
+ *
+ * Pipeline (resize plugin internals):
+ *   center-crop (on raw buffer) → scale to 300×300 → rotate
+ *
+ * Because the plugin rotates the pixel data and the Camera preview applies the
+ * same rotation (but to the full frame), the model's normalised coords map
+ * directly into portrait display space with only a vertical offset for the crop.
+ *
+ * Derivation (verified for landscape-left, landscape-right, portrait):
+ *   cropSize = min(frameWidth, frameHeight)  ≡  displayW
+ *   cropOffsetY = (displayH − cropSize) / 2
+ *   display_x = model_x × cropSize
+ *   display_y = cropOffsetY + model_y × cropSize
+ * Then apply Camera "cover" mode scaling.
+ */
+export function mapBoxToScreen(
+  box: BoundingBox,
+  frameInfo: FrameInfo,
+  screenWidth: number,
+  screenHeight: number,
+  _modelInputSize: number,
+): ScreenBox {
+  const { frameWidth, frameHeight, frameOrientation } = frameInfo;
+
+  // Step 1: Portrait display dimensions
+  const isLandscape =
+    frameOrientation === 'landscape-left' ||
+    frameOrientation === 'landscape-right';
+
+  const displayW = isLandscape ? frameHeight : frameWidth;
+  const displayH = isLandscape ? frameWidth : frameHeight;
+
+  // Step 2: Un-crop.
+  // The resize plugin center-crops a square (size = min(frameW, frameH)) from
+  // the raw buffer, scales it, then rotates.  After rotation the cropped
+  // square covers the full display width and a centred vertical band.
+  const cropSize = Math.min(frameWidth, frameHeight); // === displayW
+  const cropOffsetY = (displayH - cropSize) / 2;
+  // Model normalised coords → display pixel coords (portrait space)
+  const dispX1 = box.left * cropSize;
+  const dispY1 = cropOffsetY + box.top * cropSize;
+  const dispX2 = box.right * cropSize;
+  const dispY2 = cropOffsetY + box.bottom * cropSize;
+
+  // Step 3: Camera preview "cover" mode transform.
+  const scale = Math.max(screenWidth / displayW, screenHeight / displayH);
+  const offsetX = (screenWidth - displayW * scale) / 2;
+  const offsetY = (screenHeight - displayH * scale) / 2;
+
+  const screenX1 = dispX1 * scale + offsetX;
+  const screenY1 = dispY1 * scale + offsetY;
+  const screenX2 = dispX2 * scale + offsetX;
+  const screenY2 = dispY2 * scale + offsetY;
+
+  // Clamp to screen bounds
+  const clampedX = Math.max(0, screenX1);
+  const clampedY = Math.max(0, screenY1);
+  const clampedX2 = Math.min(screenWidth, screenX2);
+  const clampedY2 = Math.min(screenHeight, screenY2);
+
+  return {
+    x: clampedX,
+    y: clampedY,
+    width: Math.max(0, clampedX2 - clampedX),
+    height: Math.max(0, clampedY2 - clampedY),
+  };
+}
+
 // Default export for convenience
 export default {
   decodePredictions,
@@ -297,5 +390,6 @@ export default {
   formatDetection,
   filterByClass,
   filterByMinArea,
+  mapBoxToScreen,
   COCO_CLASSES,
 };
