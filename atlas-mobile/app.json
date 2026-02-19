@@ -14,6 +14,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Atlas needs camera access to detect and describe objects in your environment for vision assistance.",
         "NSMicrophoneUsageDescription": "Atlas needs microphone access for audio features.",
+        "NSSpeechRecognitionUsageDescription": "Atlas needs speech recognition to provide live captions of nearby conversations for hearing assistance.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.risithcha.atlasmobile"
@@ -44,7 +45,15 @@
           "enableAndroidGpuLibraries": true
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Atlas needs microphone access for audio features.",
+          "speechRecognitionPermission": "Atlas needs speech recognition to provide live captions of nearby conversations for hearing assistance.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ]
     ],
     "extra": {
       "eas": {
