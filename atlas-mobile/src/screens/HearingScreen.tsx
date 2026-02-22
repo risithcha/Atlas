@@ -7,7 +7,7 @@
  *
  * Lifecycle:
  *   • Stops listening when the screen loses focus (tab switch) and does
- *     NOT auto-resume — the user is always in control via the toggle.
+ *     NOT auto-resume. The user is always in control via the toggle.
  */
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -31,7 +31,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
-import { useSpeechRecognition } from '../hooks';
+import { useSpeechRecognition, useAppState } from '../hooks';
+import { triggerHaptic } from '../utils/haptics';
 import { COLORS, RADII, SPACING } from '../theme';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,7 @@ import { COLORS, RADII, SPACING } from '../theme';
 // ---------------------------------------------------------------------------
 export default function HearingScreen() {
   const isFocused = useIsFocused();
+  const appState = useAppState();
   const scrollRef = useRef<ScrollView>(null);
 
   const {
@@ -51,12 +53,12 @@ export default function HearingScreen() {
     resetTranscript,
   } = useSpeechRecognition({ lang: 'en-US', continuous: true });
 
-  // --- Stop listening when navigating away ---
+  // --- Stop listening when navigating away or app backgrounds ---
   useEffect(() => {
-    if (!isFocused && isListening) {
+    if ((!isFocused || appState !== 'active') && isListening) {
       stopListening();
     }
-  }, [isFocused, isListening, stopListening]);
+  }, [isFocused, appState, isListening, stopListening]);
 
   // --- Pulsing dot animation (Reanimated) ---
   const pulseScale = useSharedValue(1);
@@ -100,12 +102,19 @@ export default function HearingScreen() {
 
   // --- Toggle handler ---
   const handleToggle = useCallback(async () => {
+    triggerHaptic('toggle');
     if (isListening) {
       await stopListening();
     } else {
       await startListening();
     }
   }, [isListening, startListening, stopListening]);
+
+  // --- Clear handler with haptic ---
+  const handleClear = useCallback(() => {
+    triggerHaptic('selection');
+    resetTranscript();
+  }, [resetTranscript]);
 
   // --- Render ---
   return (
@@ -137,7 +146,7 @@ export default function HearingScreen() {
         {/* Instruction text */}
         <Text style={styles.instructions}>
           {isListening
-            ? 'Speak clearly — live captions will appear below.'
+            ? 'Speak clearly  live captions will appear below.'
             : 'Tap "Start Listening" to begin live captioning.'}
         </Text>
 
@@ -188,7 +197,7 @@ export default function HearingScreen() {
               styles.clearButton,
               !text && styles.clearButtonDisabled,
             ]}
-            onPress={resetTranscript}
+            onPress={handleClear}
             disabled={!text}
             activeOpacity={0.7}
           >

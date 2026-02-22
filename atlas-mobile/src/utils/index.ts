@@ -1,5 +1,9 @@
-// Atlas Mobile Utilities - TensorFlow Lite model output processing
+// Atlas Mobile Utilities
 
+// Haptic feedback
+export { triggerHaptic, type HapticType } from './haptics';
+
+// TensorFlow Lite model output processing
 export {
   // Decoders
   decodePredictions,

@@ -29,10 +29,13 @@ import {
 } from 'react-native-vision-camera';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { useResizePlugin } from 'vision-camera-resize-plugin';
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { Worklets } from 'react-native-worklets-core';
 import { useIsFocused } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+
+import { useAppState } from '../hooks';
+import { triggerHaptic } from '../utils/haptics';
 
 import { DetectionOverlay } from '../components/DetectionOverlay';
 import {
@@ -58,6 +61,10 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 // ---------------------------------------------------------------------------
 export default function VisionScreen() {
   const isFocused = useIsFocused();
+  const appState = useAppState();
+
+  // Camera should only run when the screen is focused AND the app is foregrounded.
+  const isScreenActive = isFocused && appState === 'active';
 
   const [facing, setFacing] = useState<'front' | 'back'>('back');
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -79,16 +86,17 @@ export default function VisionScreen() {
   const lastInferenceRef = useRef(Date.now());
 
   // Bridge: worklet → JS thread
-  const onDetectionResults = Worklets.createRunOnJS(
-    (
-      rawBoxes: number[],
-      rawClasses: number[],
-      rawScores: number[],
-      rawCount: number,
-      fWidth: number,
-      fHeight: number,
-      fOrientation: string,
-    ) => {
+  // Wrapped in useRef so we only create the bridge once – calling
+  // Worklets.createRunOnJS on every render can cause race conditions.
+  const detectionCallbackRef = useRef((
+    rawBoxes: number[],
+    rawClasses: number[],
+    rawScores: number[],
+    rawCount: number,
+    fWidth: number,
+    fHeight: number,
+    fOrientation: string,
+  ) => {
       const now = Date.now();
       const delta = now - lastInferenceRef.current;
       lastInferenceRef.current = now;
@@ -113,7 +121,11 @@ export default function VisionScreen() {
       });
       results = filterByMinArea(results, MIN_BOX_AREA);
       setDetections(results);
-    },
+    });
+
+  const onDetectionResults = useMemo(
+    () => Worklets.createRunOnJS(detectionCallbackRef.current),
+    [],
   );
 
   // --- Frame Processor ---
@@ -170,6 +182,7 @@ export default function VisionScreen() {
 
   // Toggle camera facing
   const toggleCameraFacing = useCallback(() => {
+    triggerHaptic('toggle');
     setFacing((c) => (c === 'back' ? 'front' : 'back'));
   }, []);
 
@@ -256,7 +269,7 @@ export default function VisionScreen() {
       <Camera
         style={StyleSheet.absoluteFill}
         device={device}
-        isActive={isFocused}
+        isActive={isScreenActive}
         frameProcessor={frameProcessor}
         pixelFormat="yuv"
         resizeMode="cover"
