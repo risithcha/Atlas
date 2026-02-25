@@ -19,7 +19,6 @@ import {
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Camera,
   useCameraDevice,
@@ -37,7 +36,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAppState } from '../hooks';
 import { triggerHaptic } from '../utils/haptics';
 
-import { DetectionOverlay } from '../components/DetectionOverlay';
+import { DetectionOverlay, AtlasHeader, ActionButton } from '../components';
 import {
   decodePredictions,
   filterByMinArea,
@@ -47,6 +46,10 @@ import {
 } from '../utils/tensor_decoder';
 import {
   COLORS,
+  TYPOGRAPHY,
+  SPACING,
+  RADII,
+  SIZES,
   MODEL_INPUT_SIZE,
   CONFIDENCE_THRESHOLD,
   MAX_DETECTIONS,
@@ -205,7 +208,7 @@ export default function VisionScreen() {
       <View style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.loadingContainer}>
-          <Ionicons name="alert-circle" size={64} color="#FF5252" />
+          <Ionicons name="alert-circle" size={64} color={COLORS.danger} />
           <Text style={styles.errorTitle}>Model Error</Text>
           <Text style={styles.loadingText}>
             {tfModel.error?.message ?? 'Unknown error'}
@@ -219,31 +222,24 @@ export default function VisionScreen() {
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
-        <SafeAreaView style={styles.permissionContainer}>
-          <View style={styles.header}>
-            <Text style={styles.logoText}>ATLAS</Text>
-            <Text style={styles.tagline}>Vision Assist</Text>
+        <AtlasHeader subtitle="Vision Assist" accentColor={COLORS.secondary} />
+        <View style={styles.permissionContent}>
+          <View style={styles.cameraIconContainer}>
+            <Ionicons name="camera" size={48} color={COLORS.secondary} />
           </View>
-          <View style={styles.permissionContent}>
-            <View style={styles.cameraIconContainer}>
-              <Ionicons name="camera" size={48} color={COLORS.primary} />
-            </View>
-            <Text style={styles.permissionTitle}>Camera Access Required</Text>
-            <Text style={styles.permissionMessage}>
-              Atlas needs access to your camera to detect and describe objects in
-              your environment.
-            </Text>
-            <TouchableOpacity
-              style={styles.permissionButton}
-              onPress={requestPermission}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.permissionButtonText}>
-                Grant Camera Permission
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
+          <Text style={styles.permissionTitle}>Camera Access Required</Text>
+          <Text style={styles.permissionMessage}>
+            Atlas needs access to your camera to detect and describe objects in
+            your environment.
+          </Text>
+          <ActionButton
+            label="Grant Camera Permission"
+            icon="camera"
+            color={COLORS.secondary}
+            variant="filled"
+            onPress={requestPermission}
+          />
+        </View>
       </View>
     );
   }
@@ -278,28 +274,32 @@ export default function VisionScreen() {
       {/* Bounding-box overlay */}
       <DetectionOverlay detections={detections} frameInfo={frameInfo} />
 
-      {/* Top bar */}
-      <SafeAreaView style={styles.topOverlay} edges={['top']}>
-        <View style={styles.topBar}>
-          <Text style={styles.logoTextSmall}>ATLAS</Text>
-          {detections.length > 0 && (
-            <View style={styles.countBadge}>
-              <Text style={styles.countText}>{detections.length}</Text>
-            </View>
-          )}
-          <TouchableOpacity
-            style={styles.flipButton}
-            onPress={toggleCameraFacing}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="camera-reverse-outline"
-              size={28}
-              color="#ffffff"
-            />
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+      {/* Top bar – unified header (transparent over camera) */}
+      <AtlasHeader
+        subtitle="Vision Assist"
+        accentColor={COLORS.secondary}
+        transparent
+        rightContent={
+          <View style={styles.topBarRight}>
+            {detections.length > 0 && (
+              <View style={styles.countBadge}>
+                <Text style={styles.countText}>{detections.length}</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={styles.flipButton}
+              onPress={toggleCameraFacing}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="camera-reverse-outline"
+                size={28}
+                color={COLORS.text}
+              />
+            </TouchableOpacity>
+          </View>
+        }
+      />
 
       {/* Bottom overlay */}
       <View style={styles.bottomOverlay}>
@@ -353,128 +353,76 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    padding: SPACING.xxl,
   },
   loadingText: {
     color: COLORS.textMuted,
-    fontSize: 16,
-    marginTop: 16,
+    fontSize: TYPOGRAPHY.body.fontSize,
+    marginTop: SPACING.md,
     textAlign: 'center',
   },
   errorTitle: {
     color: COLORS.text,
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 16,
+    ...TYPOGRAPHY.title,
+    marginTop: SPACING.md,
   },
 
   // Permission
-  permissionContainer: {
-    flex: 1,
-    justifyContent: 'space-between',
-    paddingHorizontal: 30,
-    paddingVertical: 50,
-  },
-  header: {
-    alignItems: 'center',
-    marginTop: 40,
-  },
-  logoText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-    letterSpacing: 8,
-  },
-  tagline: {
-    fontSize: 16,
-    color: COLORS.textMuted,
-    marginTop: 8,
-    letterSpacing: 2,
-  },
   permissionContent: {
     alignItems: 'center',
     flex: 1,
     justifyContent: 'center',
+    paddingHorizontal: SPACING.xl,
   },
   cameraIconContainer: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: 'rgba(76, 175, 80, 0.2)',
+    backgroundColor: COLORS.secondaryFaded,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: SPACING.lg,
   },
   permissionTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    ...TYPOGRAPHY.title,
     color: COLORS.text,
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: SPACING.md,
   },
   permissionMessage: {
-    fontSize: 16,
+    fontSize: TYPOGRAPHY.body.fontSize,
     color: COLORS.textMuted,
     textAlign: 'center',
     lineHeight: 24,
-    marginBottom: 40,
-    paddingHorizontal: 20,
-  },
-  permissionButton: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    borderRadius: 12,
-    minWidth: 280,
-  },
-  permissionButtonText: {
-    color: COLORS.text,
-    fontSize: 18,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    marginBottom: SPACING.xxl,
+    paddingHorizontal: SPACING.lg,
   },
 
-  // Top overlay
-  topOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: COLORS.overlay,
-    paddingTop: Platform.OS === 'android' ? 30 : 0,
-  },
-  topBar: {
+  // Top bar overlay
+  topBarRight: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-  },
-  logoTextSmall: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-    letterSpacing: 4,
+    gap: SPACING.sm,
   },
   flipButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: SIZES.iconButton,
+    height: SIZES.iconButton,
+    borderRadius: SIZES.iconButtonRadius,
+    backgroundColor: COLORS.whiteFaded,
     justifyContent: 'center',
     alignItems: 'center',
   },
   countBadge: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    paddingHorizontal: 10,
+    backgroundColor: COLORS.secondary,
+    borderRadius: RADII.lg,
+    paddingHorizontal: SPACING.sm + 2,
     paddingVertical: 2,
-    minWidth: 24,
+    minWidth: SPACING.lg,
     alignItems: 'center',
   },
   countText: {
     color: COLORS.text,
-    fontSize: 14,
+    fontSize: TYPOGRAPHY.caption.fontSize,
     fontWeight: 'bold',
   },
 
@@ -485,8 +433,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: COLORS.overlay,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 30,
-    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? SPACING.xxl : SPACING.lg + 6,
+    paddingTop: SPACING.md,
     alignItems: 'center',
   },
   statusContainer: {
@@ -495,29 +443,29 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
+    width: SIZES.statusDotSmall,
+    height: SIZES.statusDotSmall,
+    borderRadius: SIZES.statusDotSmall / 2,
+    marginRight: SPACING.sm,
   },
   statusText: {
     color: COLORS.text,
-    fontSize: 16,
+    fontSize: TYPOGRAPHY.body.fontSize,
     textAlign: 'center',
   },
   fpsText: {
     color: COLORS.textMuted,
-    fontSize: 12,
+    fontSize: TYPOGRAPHY.small.fontSize,
     textAlign: 'center',
-    marginTop: 4,
+    marginTop: SPACING.xs,
   },
   detectionList: {
-    marginTop: 8,
+    marginTop: SPACING.sm,
     alignItems: 'center',
   },
   detectionItem: {
     color: COLORS.text,
-    fontSize: 13,
+    fontSize: TYPOGRAPHY.caption.fontSize,
     opacity: 0.85,
   },
 });

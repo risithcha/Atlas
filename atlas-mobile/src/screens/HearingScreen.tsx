@@ -14,11 +14,9 @@ import {
   StyleSheet,
   Text,
   View,
-  TouchableOpacity,
   ScrollView,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useRef } from 'react';
 import { useIsFocused } from '@react-navigation/native';
 import Animated, {
@@ -33,7 +31,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { useSpeechRecognition, useAppState } from '../hooks';
 import { triggerHaptic } from '../utils/haptics';
-import { COLORS, RADII, SPACING } from '../theme';
+import { COLORS, RADII, SPACING, TYPOGRAPHY, SIZES } from '../theme';
+import { AtlasHeader, ActionButton } from '../components';
 
 // ---------------------------------------------------------------------------
 // HearingScreen
@@ -120,10 +119,12 @@ export default function HearingScreen() {
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        {/* Header */}
-        <View style={styles.headerRow}>
-          <Text style={styles.title}>Hearing Assist</Text>
+
+      {/* Unified header */}
+      <AtlasHeader
+        subtitle="Hearing Assist"
+        accentColor={COLORS.primary}
+        rightContent={
           <View style={styles.statusRow}>
             <Animated.View
               style={[
@@ -141,7 +142,10 @@ export default function HearingScreen() {
               {isListening ? 'Listening...' : 'Ready'}
             </Text>
           </View>
-        </View>
+        }
+      />
+
+      <View style={styles.content}>
 
         {/* Instruction text */}
         <Text style={styles.instructions}>
@@ -191,53 +195,27 @@ export default function HearingScreen() {
 
         {/* Controls */}
         <View style={styles.controlsRow}>
-          {/* Clear button */}
-          <TouchableOpacity
-            style={[
-              styles.clearButton,
-              !text && styles.clearButtonDisabled,
-            ]}
+          <ActionButton
+            label="Clear"
+            icon="trash-outline"
+            color={COLORS.secondary}
+            variant="outlined"
             onPress={handleClear}
             disabled={!text}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="trash-outline"
-              size={20}
-              color={text ? COLORS.secondary : COLORS.textMuted}
-            />
-            <Text
-              style={[
-                styles.clearButtonText,
-                !text && styles.clearButtonTextDisabled,
-              ]}
-            >
-              Clear
-            </Text>
-          </TouchableOpacity>
+          />
 
-          {/* Listen / Stop toggle */}
-          <TouchableOpacity
-            style={[
-              styles.toggleButton,
-              isListening ? styles.toggleButtonStop : styles.toggleButtonStart,
-            ]}
+          <ActionButton
+            label={isListening ? 'Stop Listening' : 'Start Listening'}
+            icon={isListening ? 'mic-off' : 'mic'}
+            iconSize={28}
+            color={isListening ? COLORS.danger : COLORS.primary}
+            variant="filled"
             onPress={handleToggle}
             disabled={!isAvailable}
-            activeOpacity={0.8}
-          >
-            <Ionicons
-              name={isListening ? 'mic-off' : 'mic'}
-              size={28}
-              color={COLORS.text}
-              style={styles.toggleIcon}
-            />
-            <Text style={styles.toggleButtonText}>
-              {isListening ? 'Stop Listening' : 'Start Listening'}
-            </Text>
-          </TouchableOpacity>
+            fullWidth
+          />
         </View>
-      </SafeAreaView>
+      </View>
     </View>
   );
 }
@@ -250,33 +228,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  safeArea: {
+  content: {
     flex: 1,
     paddingHorizontal: SPACING.lg,
     paddingBottom: Platform.OS === 'ios' ? SPACING.md : SPACING.lg,
   },
 
-  // Header
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: SPACING.md,
-    marginBottom: SPACING.sm,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-  },
+  // Status indicator (in header rightContent)
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   statusDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: SIZES.statusDot,
+    height: SIZES.statusDot,
+    borderRadius: SIZES.statusDot / 2,
     marginRight: SPACING.sm,
   },
   statusDotActive: {
@@ -286,7 +252,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.textMuted,
   },
   statusLabel: {
-    fontSize: 16,
+    fontSize: TYPOGRAPHY.body.fontSize,
     fontWeight: 'bold',
   },
   statusLabelActive: {
@@ -298,10 +264,11 @@ const styles = StyleSheet.create({
 
   // Instructions
   instructions: {
-    fontSize: 14,
+    fontSize: TYPOGRAPHY.caption.fontSize,
     color: COLORS.textSecondary,
     textAlign: 'center',
     marginBottom: SPACING.md,
+    marginTop: SPACING.sm,
   },
 
   // Error
@@ -316,7 +283,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: COLORS.danger,
-    fontSize: 14,
+    fontSize: TYPOGRAPHY.caption.fontSize,
     marginLeft: SPACING.sm,
     flex: 1,
   },
@@ -331,7 +298,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   captionHeader: {
-    fontSize: 16,
+    fontSize: TYPOGRAPHY.body.fontSize,
     fontWeight: 'bold',
     color: COLORS.primary,
     paddingHorizontal: SPACING.md,
@@ -346,12 +313,12 @@ const styles = StyleSheet.create({
     paddingBottom: SPACING.lg,
   },
   captionText: {
-    fontSize: 22,
+    fontSize: TYPOGRAPHY.bodyLarge.fontSize,
     color: COLORS.text,
     lineHeight: 34,
   },
   placeholderText: {
-    fontSize: 16,
+    fontSize: TYPOGRAPHY.body.fontSize,
     color: COLORS.textMuted,
     lineHeight: 26,
     fontStyle: 'italic',
@@ -363,52 +330,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SPACING.md,
     paddingBottom: SPACING.sm,
-  },
-  clearButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.secondary,
-    borderRadius: RADII.lg,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    gap: SPACING.sm,
-  },
-  clearButtonDisabled: {
-    borderColor: COLORS.textMuted,
-    opacity: 0.5,
-  },
-  clearButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.secondary,
-  },
-  clearButtonTextDisabled: {
-    color: COLORS.textMuted,
-  },
-
-  // Toggle button
-  toggleButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: RADII.lg,
-    paddingVertical: SPACING.md,
-    minHeight: 60,
-  },
-  toggleButtonStart: {
-    backgroundColor: COLORS.primary,
-  },
-  toggleButtonStop: {
-    backgroundColor: COLORS.danger,
-  },
-  toggleIcon: {
-    marginRight: SPACING.sm,
-  },
-  toggleButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.text,
   },
 });

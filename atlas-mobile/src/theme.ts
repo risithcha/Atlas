@@ -32,6 +32,10 @@ export const COLORS = {
   /** Warning / alerts */
   warning: '#FFC107',
   warningBright: '#FFEB3B',
+  /** Faded / translucent variants */
+  primaryFaded: 'rgba(76, 175, 80, 0.2)',
+  secondaryFaded: 'rgba(33, 150, 243, 0.2)',
+  whiteFaded: 'rgba(255, 255, 255, 0.2)',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -73,6 +77,10 @@ export const TYPOGRAPHY = {
   /** Body / caption text */
   body: { fontSize: 16 },
   bodyLarge: { fontSize: 22 },
+  /** Button label */
+  button: { fontSize: 18, fontWeight: 'bold' as const },
+  /** Subtitle / tagline */
+  subtitle: { fontSize: 16, fontWeight: '600' as const, letterSpacing: 2 },
   /** Small / meta text */
   caption: { fontSize: 13 },
   small: { fontSize: 12 },
@@ -97,4 +105,31 @@ export const RADII = {
   lg: 12,
   xl: 16,
   round: 999,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Component-level size tokens
+// ---------------------------------------------------------------------------
+export const SIZES = {
+  /** Tab bar total height (icon + label + padding) */
+  tabBarHeight: 90,
+  tabBarPaddingBottom: 28,
+  /** Unified header height (excl. safe-area insets) */
+  headerHeight: 56,
+  /** Standard action-button min height */
+  buttonMinHeight: 60,
+  /** Round icon-button dimensions */
+  iconButton: 44,
+  iconButtonRadius: 22,
+  /** Status dot */
+  statusDot: 12,
+  statusDotSmall: 10,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Per-tab accent colours  (Vision = blue, Hearing = green)
+// ---------------------------------------------------------------------------
+export const TAB_ACCENT = {
+  Vision: COLORS.secondary,
+  Hearing: COLORS.primary,
 } as const;

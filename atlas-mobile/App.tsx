@@ -12,7 +12,7 @@
  * the app.
  *
  * Accessibility:
- *   • Haptic feedback on every tab switch (`selectionAsync`).
+ *   • Haptic feedback on every tab switch.
  *   • Android hardware back button: double-press to exit.
  */
 import React from 'react';
@@ -23,12 +23,13 @@ import {
   useNavigationContainerRef,
 } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { HearingScreen } from './src/screens';
 import { useAndroidBackHandler } from './src/hooks';
 import { triggerHaptic } from './src/utils/haptics';
-import { COLORS } from './src/theme';
+import { COLORS, TYPOGRAPHY, SPACING, SIZES, TAB_ACCENT } from './src/theme';
 
 // ---------------------------------------------------------------------------
 // Lazy-load VisionScreen so that react-native-vision-camera,
@@ -58,9 +59,9 @@ function VisionScreenWrapper() {
 }
 
 const lazyStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a1a' },
+  container: { flex: 1, backgroundColor: COLORS.background },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  text: { color: '#aaa', fontSize: 16 },
+  text: { color: COLORS.textSecondary, fontSize: TYPOGRAPHY.body.fontSize },
 });
 
 // ---------------------------------------------------------------------------
@@ -90,7 +91,7 @@ class ErrorBoundary extends React.Component<EBProps, EBState> {
       return (
         <View style={ebStyles.container}>
           <StatusBar style="light" />
-          <Ionicons name="bug-outline" size={64} color="#FF5252" />
+          <Ionicons name="bug-outline" size={64} color={COLORS.danger} />
           <Text style={ebStyles.title}>Atlas Crashed</Text>
           <Text style={ebStyles.message}>
             {this.state.error?.message ?? 'Unknown error'}
@@ -109,23 +110,28 @@ class ErrorBoundary extends React.Component<EBProps, EBState> {
 const ebStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
+    padding: SPACING.xl,
   },
-  title: { color: '#fff', fontSize: 24, fontWeight: 'bold', marginTop: 16 },
+  title: {
+    color: COLORS.text,
+    fontSize: TYPOGRAPHY.title.fontSize,
+    fontWeight: TYPOGRAPHY.title.fontWeight,
+    marginTop: SPACING.md,
+  },
   message: {
-    color: '#FF5252',
-    fontSize: 14,
+    color: COLORS.danger,
+    fontSize: TYPOGRAPHY.caption.fontSize,
     textAlign: 'center',
-    marginTop: 12,
+    marginTop: SPACING.sm,
   },
   hint: {
-    color: '#888',
-    fontSize: 13,
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.caption.fontSize,
     textAlign: 'center',
-    marginTop: 16,
+    marginTop: SPACING.md,
     lineHeight: 20,
   },
 });
@@ -150,14 +156,13 @@ function AppNavigator() {
           backgroundColor: COLORS.background,
           borderTopColor: COLORS.surface,
           borderTopWidth: 1,
-          height: 90,
-          paddingBottom: 28,
-          paddingTop: 8,
+          height: SIZES.tabBarHeight,
+          paddingBottom: SIZES.tabBarPaddingBottom,
+          paddingTop: SPACING.sm,
         },
-        tabBarActiveTintColor: COLORS.primary,
         tabBarInactiveTintColor: COLORS.textMuted,
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: TYPOGRAPHY.small.fontSize,
           fontWeight: '600',
         },
       }}
@@ -172,6 +177,7 @@ function AppNavigator() {
         component={VisionScreenWrapper}
         options={{
           tabBarLabel: 'Vision',
+          tabBarActiveTintColor: TAB_ACCENT.Vision,
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons
               name={focused ? 'eye' : 'eye-outline'}
@@ -187,6 +193,7 @@ function AppNavigator() {
         component={HearingScreen}
         options={{
           tabBarLabel: 'Hearing',
+          tabBarActiveTintColor: TAB_ACCENT.Hearing,
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons
               name={focused ? 'ear' : 'ear-outline'}
@@ -206,11 +213,13 @@ export default function App() {
   useAndroidBackHandler(navigationRef);
 
   return (
-    <ErrorBoundary>
-      <StatusBar style="light" />
-      <NavigationContainer ref={navigationRef}>
-        <AppNavigator />
-      </NavigationContainer>
-    </ErrorBoundary>
+    <SafeAreaProvider>
+      <ErrorBoundary>
+        <StatusBar style="light" />
+        <NavigationContainer ref={navigationRef}>
+          <AppNavigator />
+        </NavigationContainer>
+      </ErrorBoundary>
+    </SafeAreaProvider>
   );
 }
