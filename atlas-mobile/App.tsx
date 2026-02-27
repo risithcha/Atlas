@@ -23,10 +23,12 @@ import {
   useNavigationContainerRef,
 } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { HearingScreen } from './src/screens';
+import WelcomeScreen from './src/screens/WelcomeScreen';
 import { useAndroidBackHandler } from './src/hooks';
 import { triggerHaptic } from './src/utils/haptics';
 import { COLORS, TYPOGRAPHY, SPACING, SIZES, TAB_ACCENT } from './src/theme';
@@ -137,14 +139,12 @@ const ebStyles = StyleSheet.create({
 });
 
 const Tab = createBottomTabNavigator();
+const Stack = createNativeStackNavigator();
 
 /**
- * Inner component that renders the tab navigator.
- * Back-button handling has moved to App() where the
- * NavigationContainer ref lives.
+ * Tab navigator – the core two-tab experience.
  */
-function AppNavigator() {
-
+function TabNavigator() {
   return (
     <Tab.Navigator
       screenOptions={{
@@ -205,6 +205,22 @@ function AppNavigator() {
         }}
       />
     </Tab.Navigator>
+  );
+}
+
+/**
+ * Root stack: Welcome --> Main (tabs).
+ * The Welcome screen is shown once per launch
+ * uses `replace` so the user can't swipe back to it.
+ */
+function AppNavigator() {
+  return (
+    <Stack.Navigator
+      screenOptions={{ headerShown: false, animation: 'fade' }}
+    >
+      <Stack.Screen name="Welcome" component={WelcomeScreen} />
+      <Stack.Screen name="Main" component={TabNavigator} />
+    </Stack.Navigator>
   );
 }
 
