@@ -110,17 +110,24 @@ class SoundClassifier:
     
     def _try_load_yamnet(self):
         """Attempt to load YAMNet model from TensorFlow Hub."""
-        import tensorflow_hub as hub
-        import tensorflow as tf
-        import csv
-        self.yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
-        # Load class names from the model's asset
-        class_map_path = self.yamnet_model.class_map_path().numpy().decode('utf-8')
-        with tf.io.gfile.GFile(class_map_path) as f:
-            reader = csv.DictReader(f)
-            self.yamnet_classes = [row['display_name'] for row in reader]
-        self.yamnet_available = True
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="yamnet")
+        try:
+            import tensorflow_hub as hub
+            import tensorflow as tf
+            import csv
+            self.yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
+            # Load class names from the model's asset
+            class_map_path = self.yamnet_model.class_map_path().numpy().decode('utf-8')
+            with tf.io.gfile.GFile(class_map_path) as f:
+                reader = csv.DictReader(f)
+                self.yamnet_classes = [row['display_name'] for row in reader]
+            self.yamnet_available = True
+            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="yamnet")
+            print("[SoundClassifier] YAMNet loaded successfully")
+        except Exception as e:
+            print(f"[SoundClassifier] YAMNet failed to load, falling back to FFT-only: {e}")
+            self.yamnet_model = None
+            self.yamnet_classes = None
+            self.yamnet_available = False
 
     def __del__(self):
         try:
