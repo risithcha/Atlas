@@ -6,9 +6,9 @@ Detects sirens, alarms, and similar high-priority sounds using YAMNet and FFT.
 import numpy as np
 import io
 import wave
+import threading
 from typing import Optional, Dict, List, Tuple
 import os
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 # Sound classification result types
 ALERT_TYPES = {
@@ -86,24 +86,16 @@ class SoundClassifier:
     Uses YAMNet first with a strict timeout; if it doesn't return in time or no alert is detected, falls back to fast FFT.
     """
     
-    def __init__(self, use_yamnet: bool = True, ai_timeout_ms: Optional[int] = None):
+    def __init__(self, use_yamnet: bool = True):
         """
         Initialize the sound classifier.
         
         Args:
             use_yamnet: Whether to try loading YAMNet model
-            ai_timeout_ms: Timeout for AI inference in milliseconds. If None, uses env ATLAS_YAMNET_TIMEOUT_MS or defaults to 150ms.
         """
         self.yamnet_model = None
         self.yamnet_classes = None
         self.yamnet_available = False
-        # Timeout budget for YAMNet to keep UX snappy
-        self.ai_timeout_ms = (
-            int(ai_timeout_ms)
-            if ai_timeout_ms is not None
-            else int(os.getenv("ATLAS_YAMNET_TIMEOUT_MS", "150"))
-        )
-        self._executor: Optional[ThreadPoolExecutor] = None
         
         if use_yamnet:
             self._try_load_yamnet()
@@ -121,7 +113,6 @@ class SoundClassifier:
                 reader = csv.DictReader(f)
                 self.yamnet_classes = [row['display_name'] for row in reader]
             self.yamnet_available = True
-            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="yamnet")
             print("[SoundClassifier] YAMNet loaded successfully")
         except Exception as e:
             print(f"[SoundClassifier] YAMNet failed to load, falling back to FFT-only: {e}")
@@ -129,13 +120,6 @@ class SoundClassifier:
             self.yamnet_classes = None
             self.yamnet_available = False
 
-    def __del__(self):
-        try:
-            if self._executor is not None:
-                self._executor.shutdown(wait=False, cancel_futures=True)  # type: ignore[arg-type]
-        except Exception:
-            pass
-    
     def _parse_wav_bytes(self, audio_data: bytes) -> Tuple[np.ndarray, int]:
         """
         Parse WAV audio bytes into numpy array and sample rate.
@@ -353,8 +337,8 @@ class SoundClassifier:
                 "alert_type": alert_key,
                 "alert_message": ALERT_TYPES.get(alert_key, "ALERT DETECTED"),
                 "confidence": float(confidence),
-                "is_pulsing": is_pulsing,
-                "is_sweeping": is_sweeping,
+                "is_pulsing": bool(is_pulsing),
+                "is_sweeping": bool(is_sweeping),
                 "avg_spectral_centroid": float(avg_centroid),
                 "detections": detections[:5],  # First 5 detections
             }
@@ -440,16 +424,10 @@ class SoundClassifier:
                     "details": {"error": "Audio too short"}
                 }
             
-            # First: Try YAMNet if available (AI-first) with strict timeout
-            if self.yamnet_available and self._executor is not None:
-                timeout_s = max(0.05, float(self.ai_timeout_ms) / 1000.0)
-                yamnet_result: Dict
-                future = self._executor.submit(self._analyze_yamnet, audio, sample_rate)
+            # First: Try YAMNet if available (AI-first)
+            if self.yamnet_available:
                 try:
-                    yamnet_result = future.result(timeout=timeout_s)
-                except FuturesTimeoutError:
-                    future.cancel()
-                    yamnet_result = {"detected": False, "method": "yamnet", "timeout": True}
+                    yamnet_result = self._analyze_yamnet(audio, sample_rate)
                 except Exception as e:
                     yamnet_result = {"detected": False, "method": "yamnet", "error": str(e)}
 
@@ -500,14 +478,17 @@ class SoundClassifier:
 
 # Global instance (lazy initialization)
 _classifier_instance: Optional[SoundClassifier] = None
+_classifier_lock = threading.Lock()
 
 
 def get_classifier() -> SoundClassifier:
-    """Get or create the global SoundClassifier instance."""
+    """Get or create the global SoundClassifier instance (thread-safe)."""
     global _classifier_instance
     if _classifier_instance is None:
-        # Try to use YAMNet, but fall back to FFT-only if not available
-        _classifier_instance = SoundClassifier(use_yamnet=True)
+        with _classifier_lock:
+            if _classifier_instance is None:
+                # Try to use YAMNet, but fall back to FFT-only if not available
+                _classifier_instance = SoundClassifier(use_yamnet=True)
     return _classifier_instance
 
 

@@ -37,19 +37,19 @@ class AudioRecorder(QObject):
         self._recording_thread: Optional[threading.Thread] = None
         self._is_recording: bool = False
         self._stop_event: threading.Event = threading.Event()
-        self._chunk_duration: float = 3.0  # 3 seconds per chunk
+        self._chunk_duration: float = 0.5  # 0.5 seconds per chunk for live streaming
         
     @property
     def is_recording(self) -> bool:
         """Check if the recorder is currently active."""
         return self._is_recording
     
-    def start_listening(self, chunk_duration: float = 3.0) -> bool:
+    def start_listening(self, chunk_duration: float = 0.5) -> bool:
         """
         Start recording audio from the microphone in a background thread.
         Emits audio chunks via audio_ready signal.
         Args:
-            chunk_duration: Duration of each audio chunk in seconds (default: 3.0).
+            chunk_duration: Duration of each audio chunk in seconds (default: 0.5).
         
         Returns:
             bool: True if recording started successfully, False otherwise.
@@ -59,7 +59,7 @@ class AudioRecorder(QObject):
             self.error_occurred.emit("Recording is already in progress.")
             return False
         
-        self._chunk_duration = max(1.0, min(chunk_duration, 30.0))  # Clamp to 1-30 sec
+        self._chunk_duration = max(0.3, min(chunk_duration, 30.0))  # Clamp to 0.3-30 sec
         self._stop_event.clear()
         
         # Start recording in a background thread

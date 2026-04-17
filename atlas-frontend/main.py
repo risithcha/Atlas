@@ -5,6 +5,7 @@ import numpy as np
 import base64
 import threading
 import winsound
+import socketio as socketio_client
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QHBoxLayout, QPushButton, QLabel, QStackedWidget,
@@ -449,7 +450,7 @@ class HearingModeWidget(QWidget):
     """Hearing Assist widget with live captions and threaded audio capture."""
     
     # Signals for thread-safe UI updates
-    transcription_received = pyqtSignal(str)  # Emitted when transcription is ready
+    transcription_received = pyqtSignal(str, bool)  # (text, is_final)
     error_received = pyqtSignal(str)          # Emitted when an error occurs
     status_update = pyqtSignal()              # Emitted to update status to listening
     alert_received = pyqtSignal(str)          # Emitted when a safety alert is detected
@@ -466,9 +467,15 @@ class HearingModeWidget(QWidget):
         self.alert_flash_timer = None
         self.alert_flash_state = False
         self.current_alert = None
+        self._live_text = ""       # Current interim preview text
+        self._history_text = ""    # Finalized/committed transcription text
+        
+        # SocketIO client for real-time streaming
+        self.sio = socketio_client.Client(reconnection=True, reconnection_delay=1)
+        self._setup_socketio()
         
         # Connect signals to slots (thread-safe)
-        self.transcription_received.connect(self._append_transcription)
+        self.transcription_received.connect(self._update_live_transcription)
         self.error_received.connect(self._show_error)
         self.status_update.connect(self._update_status_listening)
         self.alert_received.connect(self._show_alert_overlay)
@@ -758,6 +765,31 @@ class HearingModeWidget(QWidget):
         self.recorder.recording_started.connect(self.on_recording_started)
         self.recorder.recording_stopped.connect(self.on_recording_stopped)
     
+    def _setup_socketio(self):
+        """Wire up SocketIO event handlers for live streaming."""
+        @self.sio.on('transcription')
+        def _on_transcription(data):
+            text = data.get('text', '').strip()
+            is_final = data.get('final', False)
+            if text:
+                self.transcription_received.emit(text, is_final)
+
+        @self.sio.on('classification')
+        def _on_classification(data):
+            alert = data.get('alert')
+            if alert is not None:
+                self.alert_received.emit(str(alert))
+            elif self.current_alert is not None:
+                self.alert_cleared.emit()
+
+        @self.sio.on('connect')
+        def _on_connect():
+            print("[WS] Connected to backend")
+
+        @self.sio.on('disconnect')
+        def _on_disconnect():
+            print("[WS] Disconnected from backend")
+
     def toggle_listening(self):
         """Toggle between listening and stopped states."""
         if self.is_listening:
@@ -770,9 +802,16 @@ class HearingModeWidget(QWidget):
         if self.recorder is None:
             self.on_audio_error("Audio recorder not initialized")
             return
-            
-        # Start recording with 3-second chunks
-        success = self.recorder.start_listening(chunk_duration=3.0)
+
+        # Connect WebSocket to backend
+        if not self.sio.connected:
+            try:
+                self.sio.connect(self.backend_url, wait_timeout=5)
+            except Exception as e:
+                print(f"[WS] Connection failed, will use HTTP fallback: {e}")
+
+        # Start recording with 0.5-second chunks for live streaming
+        success = self.recorder.start_listening(chunk_duration=0.5)
         
         if success:
             self.is_listening = True
@@ -800,6 +839,22 @@ class HearingModeWidget(QWidget):
         if self.recorder:
             self.recorder.stop_listening()
         
+        # Disconnect WebSocket
+        if self.sio.connected:
+            try:
+                self.sio.disconnect()
+            except Exception:
+                pass
+        
+        # Finalize any remaining live text into history
+        if self._live_text.strip():
+            if self._history_text:
+                self._history_text += " " + self._live_text.strip()
+            else:
+                self._history_text = self._live_text.strip()
+            self._live_text = ""
+            self.caption_display.setPlainText(self._history_text)
+        
         self.is_listening = False
         self.listen_button.setText("Start Listening")
         self.listen_button.setStyleSheet("""
@@ -823,9 +878,18 @@ class HearingModeWidget(QWidget):
     def on_audio_ready(self, audio_data: bytes):
         """
         Handle audio data when a chunk is ready.
-        Sends the audio to the backend for transcription.
+        Sends via WebSocket for live streaming, falls back to HTTP.
         """
-        # Update status to show processing
+        if self.sio.connected:
+            # Stream via WebSocket (non-blocking, handled by socketio client thread)
+            try:
+                audio_b64 = base64.b64encode(audio_data).decode('utf-8')
+                self.sio.emit('audio_chunk', {'audio': audio_b64})
+                return
+            except Exception as e:
+                print(f"[WS] emit failed, falling back to HTTP: {e}")
+
+        # HTTP fallback
         self.status_label.setText("Processing...")
         self.status_label.setStyleSheet("""
             font-size: 16px;
@@ -833,8 +897,6 @@ class HearingModeWidget(QWidget):
             color: #FFC107;
             padding: 10px;
         """)
-        
-        # Send to backend in a separate thread to avoid blocking UI
         thread = threading.Thread(
             target=self._send_audio_to_backend,
             args=(audio_data,),
@@ -880,7 +942,7 @@ class HearingModeWidget(QWidget):
                 if transcription.strip():
                     # Emit signal to safely update UI from background thread
                     print(f"[DEBUG] Emitting transcription signal...")
-                    self.transcription_received.emit(transcription.strip())
+                    self.transcription_received.emit(transcription.strip(), True)
                 else:
                     print("[DEBUG] Empty transcription, updating status...")
                     self.status_update.emit()
@@ -899,23 +961,29 @@ class HearingModeWidget(QWidget):
             print(f"[DEBUG] Exception: {e}")
             self.error_received.emit(str(e))
     
-    def _append_transcription(self, text: str):
-        """Append transcribed text to the caption display."""
-        print(f"[DEBUG] _append_transcription called with: '{text}'")
+    def _update_live_transcription(self, text: str, is_final: bool):
+        """Update the caption display with interim or finalized text.
         
-        current_text = self.caption_display.toPlainText()
-        
-        if current_text and not current_text.endswith('\n'):
-            # Add a space or newline before new text
-            if len(current_text) > 100:
-                new_text = current_text + '\n' + text
+        interim (final=False): updates the 'live preview' line at the bottom
+        final  (final=True):   commits the text permanently to history
+        """
+        if is_final:
+            # Commit text to permanent history
+            if self._history_text:
+                self._history_text += " " + text
             else:
-                new_text = current_text + ' ' + text
+                self._history_text = text
+            self._live_text = ""
+            display = self._history_text
         else:
-            new_text = current_text + text
+            # Update interim live preview
+            self._live_text = text
+            if self._history_text:
+                display = self._history_text + " " + text
+            else:
+                display = text
         
-        self.caption_display.setPlainText(new_text)
-        print(f"[DEBUG] Caption display updated, new length: {len(new_text)}")
+        self.caption_display.setPlainText(display)
         
         # Scroll to bottom
         scrollbar = self.caption_display.verticalScrollBar()
@@ -975,8 +1043,15 @@ class HearingModeWidget(QWidget):
         """)
     
     def clear_captions(self):
-        """Clear the caption display."""
+        """Clear the caption display and server-side audio buffer."""
         self.caption_display.clear()
+        self._live_text = ""
+        self._history_text = ""
+        if self.sio.connected:
+            try:
+                self.sio.emit('clear_buffer')
+            except Exception:
+                pass
     
     # ===== CRISIS MODE ALERT METHODS =====
     

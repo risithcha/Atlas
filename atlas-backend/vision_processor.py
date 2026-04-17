@@ -5,14 +5,17 @@ from PIL import Image
 import io
 import numpy as np
 import easyocr
+import threading
 
 # Global variables to cache the model
 _model = None
 _weights = None
 _device = None
+_model_lock = threading.Lock()
 
 # Global variable to cache the OCR reader
 _ocr_reader = None
+_ocr_lock = threading.Lock()
 
 def _load_model():
     """
@@ -22,16 +25,18 @@ def _load_model():
     global _model, _weights, _device
     
     if _model is None:
-        # Use GPU if available, otherwise CPU
-        _device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        # Load pre-trained model and weights
-        _weights = SSDLite320_MobileNet_V3_Large_Weights.DEFAULT
-        _model = ssdlite320_mobilenet_v3_large(weights=_weights)
-        _model.to(_device)
-        _model.eval()
-        
-        print(f"Model loaded successfully on device: {_device}")
+        with _model_lock:
+            if _model is None:
+                # Use GPU if available, otherwise CPU
+                _device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                
+                # Load pre-trained model and weights
+                _weights = SSDLite320_MobileNet_V3_Large_Weights.DEFAULT
+                _model = ssdlite320_mobilenet_v3_large(weights=_weights)
+                _model.to(_device)
+                _model.eval()
+                
+                print(f"Model loaded successfully on device: {_device}")
     
     return _model, _weights, _device
 
@@ -43,15 +48,23 @@ def _load_ocr_reader():
     global _ocr_reader
     
     if _ocr_reader is None:
-        # Use GPU if available, otherwise CPU
-        use_gpu = torch.cuda.is_available()
-        
-        # Load OCR reader with English language support
-        _ocr_reader = easyocr.Reader(['en'], gpu=use_gpu)
-        
-        print(f"OCR reader loaded successfully (GPU: {use_gpu})")
+        with _ocr_lock:
+            if _ocr_reader is None:
+                # Use GPU if available, otherwise CPU
+                use_gpu = torch.cuda.is_available()
+                
+                # Load OCR reader with English language support
+                _ocr_reader = easyocr.Reader(['en'], gpu=use_gpu)
+                
+                print(f"OCR reader loaded successfully (GPU: {use_gpu})")
     
     return _ocr_reader
+
+def preload_models():
+    """Eagerly load both the detection model and OCR reader at startup."""
+    _load_model()
+    _load_ocr_reader()
+
 
 def _generate_scene_description(detected_objects, ocr_text):
     """
