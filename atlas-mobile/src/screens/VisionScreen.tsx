@@ -15,6 +15,7 @@ import {
   Text,
   View,
   TouchableOpacity,
+  Pressable,
   Platform,
   ActivityIndicator,
   Dimensions,
@@ -28,15 +29,22 @@ import {
 } from 'react-native-vision-camera';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { useResizePlugin } from 'vision-camera-resize-plugin';
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useTextRecognition } from 'react-native-vision-camera-ocr-plus';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { Worklets } from 'react-native-worklets-core';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
-import { useAppState } from '../hooks';
+import { useAppState, useVisionAnnouncer, useOcrAutoReader } from '../hooks';
 import { triggerHaptic } from '../utils/haptics';
+import { useSettings } from '../contexts/SettingsContext';
 
-import { DetectionOverlay, AtlasHeader, ActionButton } from '../components';
+import {
+  DetectionOverlay,
+  AtlasHeader,
+  ActionButton,
+  OcrTextPanel,
+} from '../components';
 import {
   decodePredictions,
   filterByMinArea,
@@ -44,6 +52,7 @@ import {
   type TFLiteOutputs,
   type FrameInfo,
 } from '../utils/tensor_decoder';
+import { sanitizeOcrText } from '../utils/ocr_utils';
 import {
   COLORS,
   TYPOGRAPHY,
@@ -55,6 +64,7 @@ import {
   MAX_DETECTIONS,
   INFERENCE_FPS,
   MIN_BOX_AREA,
+  OCR_FPS,
 } from '../theme';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -64,7 +74,9 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 // ---------------------------------------------------------------------------
 export default function VisionScreen() {
   const isFocused = useIsFocused();
+  const navigation = useNavigation<any>();
   const appState = useAppState();
+  const settings = useSettings();
 
   // Camera should only run when the screen is focused AND the app is foregrounded.
   const isScreenActive = isFocused && appState === 'active';
@@ -87,6 +99,14 @@ export default function VisionScreen() {
   const [frameInfo, setFrameInfo] = useState<FrameInfo | null>(null);
   const [fps, setFps] = useState(0);
   const lastInferenceRef = useRef(Date.now());
+
+  // --- OCR state ---
+  const [ocrText, setOcrText] = useState('');
+  const ocrOptions = useMemo(
+    () => ({ language: 'latin' as const, useLightweightMode: true }),
+    [],
+  );
+  const { scanText } = useTextRecognition(ocrOptions);
 
   // Bridge: worklet → JS thread
   // Wrapped in useRef so we only create the bridge once – calling
@@ -131,12 +151,24 @@ export default function VisionScreen() {
     [],
   );
 
+  // Bridge: worklet -> JS thread for OCR results
+  const ocrCallbackRef = useRef((text: string) => {
+    const cleaned = sanitizeOcrText(text);
+    setOcrText(cleaned);
+  });
+
+  const onOcrResults = useMemo(
+    () => Worklets.createRunOnJS(ocrCallbackRef.current),
+    [],
+  );
+
   // --- Frame Processor ---
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet';
       if (model == null) return;
 
+      // Object detection at INFERENCE_FPS (5 fps)
       runAtTargetFps(INFERENCE_FPS, () => {
         'worklet';
 
@@ -179,8 +211,17 @@ export default function VisionScreen() {
           frame.orientation,
         );
       });
+
+      // OCR at OCR_FPS (1 fps) - text doesn't change as fast as objects
+      runAtTargetFps(OCR_FPS, () => {
+        'worklet';
+        const result = scanText(frame);
+        if (result?.resultText != null && result.resultText.length > 0) {
+          onOcrResults(result.resultText);
+        }
+      });
     },
-    [model, resize, onDetectionResults],
+    [model, resize, onDetectionResults, scanText, onOcrResults],
   );
 
   // Toggle camera facing
@@ -188,6 +229,24 @@ export default function VisionScreen() {
     triggerHaptic('toggle');
     setFacing((c) => (c === 'back' ? 'front' : 'back'));
   }, []);
+
+  // --- TTS announcements for detected objects ---
+  useVisionAnnouncer(detections, isScreenActive, { ttsRate: settings.ttsRate });
+
+  // --- Smart OCR auto-reader (reads new text, skips duplicates) ---
+  const { readLatestAloud } = useOcrAutoReader(ocrText, isScreenActive, {
+    ttsRate: settings.ttsRate,
+  });
+
+  const goHome = useCallback(() => {
+    triggerHaptic('selection');
+    navigation.navigate('Welcome');
+  }, [navigation]);
+
+  const goSettings = useCallback(() => {
+    triggerHaptic('selection');
+    navigation.navigate('Settings');
+  }, [navigation]);
 
   // --- Render: loading / error / permission / camera ---
 
@@ -222,7 +281,7 @@ export default function VisionScreen() {
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
-        <AtlasHeader subtitle="Vision Assist" accentColor={COLORS.secondary} />
+        <AtlasHeader subtitle="Vision Assist" accentColor={COLORS.secondary} onHomePress={goHome} onSettingsPress={goSettings} />
         <View style={styles.permissionContent}>
           <View style={styles.cameraIconContainer}>
             <Ionicons name="camera" size={48} color={COLORS.secondary} />
@@ -258,7 +317,7 @@ export default function VisionScreen() {
 
   // ---- Main camera view ----
   return (
-    <View style={styles.container}>
+    <Pressable style={styles.container} onPress={readLatestAloud}>
       <StatusBar style="light" />
 
       {/* Camera – isActive driven by navigation focus */}
@@ -274,11 +333,16 @@ export default function VisionScreen() {
       {/* Bounding-box overlay */}
       <DetectionOverlay detections={detections} frameInfo={frameInfo} />
 
+      {/* OCR text panel (between overlay and bottom bar) */}
+      <OcrTextPanel text={ocrText} fontSize={settings.captionFontSize} />
+
       {/* Top bar – unified header (transparent over camera) */}
       <AtlasHeader
         subtitle="Vision Assist"
         accentColor={COLORS.secondary}
         transparent
+        onHomePress={goHome}
+        onSettingsPress={goSettings}
         rightContent={
           <View style={styles.topBarRight}>
             {detections.length > 0 && (
@@ -335,7 +399,7 @@ export default function VisionScreen() {
           </View>
         )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 

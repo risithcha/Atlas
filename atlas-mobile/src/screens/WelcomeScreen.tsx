@@ -23,11 +23,11 @@ interface WelcomeScreenProps {
 
 export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
   const handleVision = () => {
-    navigation.replace('Main', { screen: 'Vision' });
+    navigation.navigate('Main', { screen: 'Vision' });
   };
 
   const handleHearing = () => {
-    navigation.replace('Main', { screen: 'Hearing' });
+    navigation.navigate('Main', { screen: 'Hearing' });
   };
 
   return (

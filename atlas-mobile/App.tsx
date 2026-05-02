@@ -29,8 +29,10 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { HearingScreen } from './src/screens';
 import WelcomeScreen from './src/screens/WelcomeScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 import { useAndroidBackHandler } from './src/hooks';
 import { triggerHaptic } from './src/utils/haptics';
+import { SettingsProvider } from './src/contexts/SettingsContext';
 import { COLORS, TYPOGRAPHY, SPACING, SIZES, TAB_ACCENT } from './src/theme';
 
 // ---------------------------------------------------------------------------
@@ -220,6 +222,11 @@ function AppNavigator() {
     >
       <Stack.Screen name="Welcome" component={WelcomeScreen} />
       <Stack.Screen name="Main" component={TabNavigator} />
+      <Stack.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{ animation: 'slide_from_right' }}
+      />
     </Stack.Navigator>
   );
 }
@@ -230,12 +237,14 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <ErrorBoundary>
-        <StatusBar style="light" />
-        <NavigationContainer ref={navigationRef}>
-          <AppNavigator />
-        </NavigationContainer>
-      </ErrorBoundary>
+      <SettingsProvider>
+        <ErrorBoundary>
+          <StatusBar style="light" />
+          <NavigationContainer ref={navigationRef}>
+            <AppNavigator />
+          </NavigationContainer>
+        </ErrorBoundary>
+      </SettingsProvider>
     </SafeAreaProvider>
   );
 }

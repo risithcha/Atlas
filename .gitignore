@@ -207,3 +207,23 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Android release artifacts
+*.apk
+*.aab
+
+# Release / distribution archives
+*.zip
+*.tar.gz
+*.tar.bz2
+
+# React Native / Expo build outputs
+atlas-mobile/android/build/
+atlas-mobile/android/.gradle/
+atlas-mobile/android/app/build/
+atlas-mobile/android/captures/
+atlas-mobile/.expo/
+atlas-mobile/node_modules/
+
+# Model-engineering generated outputs (source models live in atlas-mobile/assets/models/)
+model_engineering/output/

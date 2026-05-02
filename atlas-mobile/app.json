@@ -53,6 +53,15 @@
           "speechRecognitionPermission": "Atlas needs speech recognition to provide live captions of nearby conversations for hearing assistance.",
           "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
         }
+      ],
+      [
+        "react-native-audio-api",
+        {
+          "iosMicrophonePermission": "Atlas needs microphone access to detect emergency sounds.",
+          "iosBackgroundMode": false,
+          "androidPermissions": ["android.permission.RECORD_AUDIO"],
+          "androidForegroundService": false
+        }
       ]
     ],
     "extra": {

@@ -215,6 +215,16 @@ export function toPixelCoordinates(
   };
 }
 
+// Spatial direction relative to the camera frame (thirds of screen width)
+export type SpatialDirection = 'Left' | 'Center' | 'Right';
+
+export function getSpatialDirection(box: BoundingBox): SpatialDirection {
+  const centerX = (box.left + box.right) / 2;
+  if (centerX < 0.33) return 'Left';
+  if (centerX > 0.66) return 'Right';
+  return 'Center';
+}
+
 // Get center point of a bounding box
 export function getBoxCenter(box: BoundingBox): { x: number; y: number } {
   return {
@@ -387,6 +397,7 @@ export default {
   toPixelCoordinates,
   getBoxCenter,
   getBoxArea,
+  getSpatialDirection,
   formatDetection,
   filterByClass,
   filterByMinArea,
