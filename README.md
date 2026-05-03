@@ -94,14 +94,16 @@ Atlas/
 │   ├── data_overlay.py
 │   └── requirements.txt
 │
-├── atlas-mobile/               # React Native R&D (The Future)
+├── atlas-mobile/               # React Native Mobile App (Production)
 │   ├── App.tsx
 │   ├── package.json
-│   └── assets/models/
-│
-├── mobile_utils/
-│   ├── tensor_decoder.ts
-│   └── index.ts
+│   ├── assets/models/
+│   └── src/
+│       ├── screens/            # VisionScreen, HearingScreen, SettingsScreen
+│       ├── hooks/              # useVisionAnnouncer, useAlarmDetector, useOcrAutoReader
+│       ├── contexts/           # SettingsContext (AsyncStorage persistence)
+│       ├── utils/              # tensor_decoder, ocr_utils, haptic_patterns, ...
+│       └── components/         # DetectionOverlay, OcrTextPanel, AlertOverlay, ...
 │
 ├── model_engineering/
 │   ├── convert_model.py
@@ -152,16 +154,33 @@ pip install -r requirements.txt
 
 ---
 
-## Mobile R&D
+## Mobile Production Release
 
-One of our stretch goals was to see if we could run this AI entirely on a phone, without any internet or servers.
+Atlas Mobile is a fully featured, production-ready Android application that achieves feature parity with the desktop client, running entirely on-device with no internet or server dependency.
 
-We built an experimental React Native app and engineered a custom Quantized TFLite Model.
+Built with React Native and Expo, the app ships with our custom 3.99 MB quantized TFLite model and a complete multi-screen navigation architecture (Vision, Hearing, Settings).
 
-**Current Status:**
-We were able to confirm that the 3.99MB quantized model loads successfully into Android memory and that tensor decoding functions correctly. Real-time frame processing is built but disabled in v1.0 for stability.
+### Mobile Feature Highlights
 
-![Mobile R&D Architecture](assets/Mobile%20RD.svg)
+* **Directional Spatial Awareness TTS**
+  Detected objects are announced with Left / Center / Right positioning derived from their bounding-box centroid, producing natural sentences like *"I see a person on the left and a laptop in the center."* A per-label cooldown and leading-edge debounce prevent repetitive announcements without missing new objects.
+
+* **On-Device OCR Text Reader**
+  Powered by ML Kit via `react-native-vision-camera-ocr-plus`, the Vision screen recognises printed text in real time directly on the device. A smart auto-reader compares successive results using string similarity and only speaks when the content is substantially new. A tap-anywhere fallback re-reads the latest text on demand.
+
+* **Persistent Accessibility Settings Panel**
+  A dedicated Settings screen exposes four user-tunable preferences: TTS Voice Speed (0.5 – 2.0×), Caption / OCR Text Size (16 – 32 px), Crisis Mode Sensitivity (FFT peak threshold 40 - 160), and the Haptic Vocabulary toggle, all persisted across sessions via AsyncStorage.
+
+* **Haptic Vocabulary**
+  Distinct vibration rhythms provide silent safety alerts for deaf-blind users. Fire alarms trigger an SOS pulse (· · · — — — · · ·), sirens trigger alternating long pulses, and new-speaker detection triggers a light double-tap. Custom `Vibration.vibrate()` patterns run on Android; `expo-haptics` notification types provide the closest approximation on iOS.
+
+* **Real-Time Frame Processing**
+  Live camera inference runs at a target FPS using `react-native-fast-tflite` and `vision-camera-resize-plugin`, with bounding-box overlays rendered via an SVG detection layer.
+
+* **Real-Time FFT Alarm Detection**
+  The Hearing screen uses `react-native-audio-api` (Web Audio API compatible) to run native FFT analysis on microphone input. A peak-based + ratio hybrid algorithm detects fire alarms, smoke detectors, and emergency sirens and fires immediate visual and haptic alerts.
+
+![Mobile Architecture](assets/Mobile%20RD.svg)
 
 ---
 
@@ -190,7 +209,7 @@ python convert_model.py
 
 * **Backend:** Python, Flask, PyTorch, OpenCV, Whisper
 * **Frontend:** Python, PyQt6, pyttsx3
-* **Mobile:** TypeScript, React Native, Expo, TensorFlow Lite
+* **Mobile:** TypeScript, React Native, Expo, TensorFlow Lite, ML Kit OCR, Web Audio API
 * **Tools:** Git, Mermaid.js, VS Code
 
 ---
