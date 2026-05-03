@@ -180,7 +180,7 @@ Built with React Native and Expo, the app ships with our custom 3.99 MB quantize
 * **Real-Time FFT Alarm Detection**
   The Hearing screen uses `react-native-audio-api` (Web Audio API compatible) to run native FFT analysis on microphone input. A peak-based + ratio hybrid algorithm detects fire alarms, smoke detectors, and emergency sirens and fires immediate visual and haptic alerts.
 
-![Mobile Architecture](assets/Mobile%20RD.svg)
+![Mobile Architecture](assets/Mobile%20Architecture%20Flowchart.svg)
 
 ---
 
