@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Event:</strong> Software Development<br>
-  <strong>Team #:</strong> SDHS~21361-3
+  <strong>Team #:</strong> SDHS~1361-3
 </p>
 
 ---
